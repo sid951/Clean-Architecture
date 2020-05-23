@@ -17,7 +17,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "API", "API", "{EA47C3C3-3C4
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "WebApi.Injector", "WebApi.Injector", "{469787F8-B31A-4817-8AEC-B46097A74610}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RootServiceInjector", "RootServiceInjector\RootServiceInjector.csproj", "{840B49BC-831E-4CE4-BB48-B48612F7BC17}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RootServiceInjector", "RootServiceInjector\RootServiceInjector.csproj", "{840B49BC-831E-4CE4-BB48-B48612F7BC17}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
