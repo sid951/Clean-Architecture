@@ -19,10 +19,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "WebApi.Injector", "WebApi.I
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RootServiceInjector", "RootServiceInjector\RootServiceInjector.csproj", "{840B49BC-831E-4CE4-BB48-B48612F7BC17}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Database", "Database", "{4DA05732-0264-42A0-9A13-C4F28F822875}"
-EndProject
-Project("{00D1A9C2-B5F0-4AF3-8072-F6C62B433612}") = "Quizoo", "..\Quizoo\Quizoo\Quizoo.sqlproj", "{B121666B-50B5-4002-9288-D3C671DBD688}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -45,12 +41,6 @@ Global
 		{840B49BC-831E-4CE4-BB48-B48612F7BC17}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{840B49BC-831E-4CE4-BB48-B48612F7BC17}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{840B49BC-831E-4CE4-BB48-B48612F7BC17}.Release|Any CPU.Build.0 = Release|Any CPU
-		{B121666B-50B5-4002-9288-D3C671DBD688}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{B121666B-50B5-4002-9288-D3C671DBD688}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{B121666B-50B5-4002-9288-D3C671DBD688}.Debug|Any CPU.Deploy.0 = Debug|Any CPU
-		{B121666B-50B5-4002-9288-D3C671DBD688}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{B121666B-50B5-4002-9288-D3C671DBD688}.Release|Any CPU.Build.0 = Release|Any CPU
-		{B121666B-50B5-4002-9288-D3C671DBD688}.Release|Any CPU.Deploy.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -60,7 +50,6 @@ Global
 		{62975A82-D082-469F-AAAD-7F34E5B7FBAC} = {BF2A2FAC-513A-4F3A-8C55-16B58FF4F35F}
 		{00D2DD41-3486-416E-BCCE-26367D7D0B3D} = {7FA524DC-1F81-448A-9D17-A0841BD6B3A9}
 		{840B49BC-831E-4CE4-BB48-B48612F7BC17} = {469787F8-B31A-4817-8AEC-B46097A74610}
-		{B121666B-50B5-4002-9288-D3C671DBD688} = {4DA05732-0264-42A0-9A13-C4F28F822875}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {B5F24425-F7DC-49A9-A5C4-B782F5560733}
