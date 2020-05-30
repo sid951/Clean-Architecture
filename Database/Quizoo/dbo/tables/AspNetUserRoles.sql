@@ -1,6 +1,6 @@
 ﻿CREATE TABLE [dbo].[AspNetUserRoles] (
-    [UserId] NVARCHAR (450) NOT NULL,
-    [RoleId] NVARCHAR (450) NOT NULL,
+    [UserId] INT NOT NULL,
+    [RoleId] INT NOT NULL,
     [CreatedBy] INT NOT NULL, 
     [CreatedOn] DATETIME NOT NULL, 
     [UpdatedBy] INT NOT NULL, 

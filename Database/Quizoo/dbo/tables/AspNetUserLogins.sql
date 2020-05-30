@@ -2,7 +2,7 @@
     [LoginProvider]       NVARCHAR (450) NOT NULL,
     [ProviderKey]         NVARCHAR (450) NOT NULL,
     [ProviderDisplayName] NVARCHAR (MAX) NULL,
-    [UserId]              NVARCHAR (450) NOT NULL,
+    [UserId]              INT NOT NULL,
     [CreatedBy] INT NOT NULL, 
     [CreatedOn] DATETIME NOT NULL, 
     [UpdatedBy] INT NOT NULL, 
