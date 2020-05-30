@@ -1,10 +1,9 @@
 ﻿CREATE TABLE [dbo].[tbl_Contest]
 (
-	[ContestID] INT NOT NULL PRIMARY KEY Identity(1,1),
-	[ContestName] varchar(100),
-	[ContestLogo] varchar(100),
-	[CreatedBy] varchar(100),
-	[UpdatedBy] varchar(100),
-	[CreatedDate] varchar(100),
-	[ModifiedDate] varchar(100)
+	[Id] INT NOT NULL PRIMARY KEY Identity(1,1) ,
+	[ContestName] varchar(100) NOT NULL,
+	[CreatedBy] INT NOT NULL,
+	[UpdatedBy] INT NOT NULL,
+	[CreatedOn] DATETIME NOT NULL,
+	[UpdatedOn] DATETIME NOT NULL
 )

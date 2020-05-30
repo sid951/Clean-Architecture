@@ -62,7 +62,6 @@
     <Folder Include="dbo\tables" />
   </ItemGroup>
   <ItemGroup>
-    <Build Include="dbo\tables\__EFMigrationsHistory.sql" />
     <Build Include="dbo\tables\AspNetRoles.sql" />
     <Build Include="dbo\tables\AspNetUsers.sql" />
     <Build Include="dbo\tables\AspNetRoleClaims.sql" />
@@ -73,5 +72,16 @@
     <Build Include="dbo\tables\tbl_Contest.sql" />
     <Build Include="dbo\tables\tbl_Teams.sql" />
     <Build Include="dbo\tables\tbl_Sports.sql" />
+    <Build Include="dbo\tables\tbl_ContestFee.sql" />
+    <Build Include="dbo\tables\tbl_ContestType.sql" />
+    <Build Include="dbo\tables\tbl_winnings.sql" />
+    <Build Include="dbo\tables\tbl_ContestWinningMapping.sql" />
+    <Build Include="dbo\tables\tbl_ContestMapping.sql" />
+    <Build Include="dbo\tables\tbl_UserPanDetails.sql" />
+    <Build Include="dbo\tables\tbl_UserBankDetails.sql" />
+    <Build Include="dbo\tables\tbl_UserBalance.sql" />
+  </ItemGroup>
+  <ItemGroup>
+    <RefactorLog Include="Quizoo.refactorlog" />
   </ItemGroup>
 </Project>
