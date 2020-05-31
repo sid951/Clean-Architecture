@@ -7,6 +7,7 @@ using AutoMapper;
 using Core;
 using Infrastructure;
 using Infrastructure.Data.Entities;
+using Infrastructure.Data.Mapping;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -36,7 +37,13 @@ namespace WebApplication1
            // Injector.Register(services);
             services.AddCors();
             services.AddControllers();
-           
+            var mappingConfig = new MapperConfiguration(mc =>
+            {
+                mc.AddProfile(new DataProfiles());
+            });
+
+            IMapper mapper = mappingConfig.CreateMapper();
+            services.AddSingleton(mapper);
             // Create the IServiceProvider based on the container.
 
             services.AddSwaggerGen(c =>
@@ -82,7 +89,7 @@ namespace WebApplication1
             //services.AddIdentity<AppUser, IdentityRole>()
             //    .AddEntityFrameworkStores<ApplicationDbContext>()
             //    .AddDefaultTokenProviders();
-            services.AddAutoMapper(typeof(Startup));
+            
             var builder = new ContainerBuilder();
             builder.RegisterModule(new CoreModules());
             builder.RegisterModule(new InfrastructureModules());            

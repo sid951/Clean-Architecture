@@ -18,20 +18,20 @@ namespace Infrastructure.Data.Entities
         public bool PhoneNumberConfirmed { get; set; }
         public bool TwoFactorEnabled { get; set; }
 
-        public ApplicationUser(string name, string username, string normaliedusername, string email, bool confirmemail, string phonenumber,
-           bool isnumberconfirmed, bool twofactorauthentication, int id = 0, string passwordhash = null)
-        {
-            Id = id;
-            UserName = username; ;
-            Name = name;
-            NormalizedUserName = normaliedusername;
-            Email = email;
-            EmailConfirmed = confirmemail;
-            PasswordHash = passwordhash;
-            PhoneNumberConfirmed = isnumberconfirmed;
-            TwoFactorEnabled = twofactorauthentication;
-            PhoneNumber = phonenumber;
-        }
+        //public ApplicationUser(string name, string username, string normaliedusername, string email, bool confirmemail, string phonenumber,
+        //   bool isnumberconfirmed, bool twofactorauthentication, int id = 0, string passwordhash = null)
+        //{
+        //    Id = id;
+        //    UserName = username; ;
+        //    Name = name;
+        //    NormalizedUserName = normaliedusername;
+        //    Email = email;
+        //    EmailConfirmed = confirmemail;
+        //    PasswordHash = passwordhash;
+        //    PhoneNumberConfirmed = isnumberconfirmed;
+        //    TwoFactorEnabled = twofactorauthentication;
+        //    PhoneNumber = phonenumber;
+        //}
     }
 
 }
