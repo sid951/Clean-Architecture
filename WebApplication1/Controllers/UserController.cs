@@ -19,11 +19,15 @@ namespace WebApplication1.Controllers
 
         private readonly ILoginUseCase _loginUseCase;
         private readonly LoginPresenter _loginPresenter;
+        private readonly IRegisterUseCase _registerUseCase;
+        private readonly RegisterPresenter _registerPresenter;
 
-        public UserController(ILoginUseCase loginUseCase, LoginPresenter loginPresenter)
+        public UserController(ILoginUseCase loginUseCase, LoginPresenter loginPresenter,IRegisterUseCase registerUseCase,RegisterPresenter registerPresenter)
         {
             _loginUseCase = loginUseCase;
             _loginPresenter = loginPresenter;
+            _registerUseCase = registerUseCase;
+            _registerPresenter = registerPresenter;
         }
 
         [HttpPost("login")]
@@ -35,6 +39,18 @@ namespace WebApplication1.Controllers
             }
             await _loginUseCase.Handle(new LoginRequest(request.UserName, request.Password), _loginPresenter);
             return _loginPresenter.ContentResult;
+        }
+
+        [HttpPost("register")]
+        public async Task<IActionResult> Register([FromBody] Models.RegisterRequest request)
+        {
+            if (!ModelState.IsValid)
+            { 
+                return BadRequest(ModelState);
+            }
+            await _registerUseCase.Handle(new RegisterRequest(request.Name, request.UserName, request.NormalizedUserName, request.Email, request.EmailConfirmed, request.PhoneNumber,
+            request.PhoneNumberConfirmed, request.TwoFactorEnabled, request.Id, request.PasswordHash),_registerPresenter);
+            return _registerPresenter.ContentResult;
         }
     }
 }

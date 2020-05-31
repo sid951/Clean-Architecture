@@ -1,10 +1,13 @@
 ﻿using AutoMapper;
 using Core.Domain.Entity;
+using Core.Dto;
+using Core.Dto.GatewayResponses.Repositories;
 using Core.Interfaces.Gateways.Repositories;
 using Infrastructure.Data.Entities;
 using Microsoft.AspNetCore.Identity;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -21,12 +24,12 @@ namespace Infrastructure.Data.Dapper.Repository
             _mapper = mapper;
         }
 
-        //public async Task<CreateUserResponse> Create(User user, string password)
-        //{
-        //    var appUser = _mapper.Map<AppUser>(user);
-        //    var identityResult = await _userManager.CreateAsync(appUser, password);
-        //    return new CreateUserResponse(appUser.Id, identityResult.Succeeded, identityResult.Succeeded ? null : identityResult.Errors.Select(e => new Error(e.Code, e.Description)));
-        //}
+        public async Task<CreateUserResponse> Create(User user)
+        {
+            var appUser = _mapper.Map<ApplicationUser>(user);
+            var identityResult = await _userManager.CreateAsync(appUser);
+            return new CreateUserResponse(appUser.Id, identityResult.Succeeded, identityResult.Succeeded ? null : identityResult.Errors.Select(e => new Error(e.Code, e.Description)));
+        }
 
         public async Task<User> FindByName(string userName)
         {

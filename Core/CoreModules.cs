@@ -12,6 +12,7 @@ namespace Core
         protected override void Load(ContainerBuilder builder)
         {
             builder.RegisterType<LoginUseCase>().As<ILoginUseCase>().InstancePerLifetimeScope();
+            builder.RegisterType<RegisterUseCase>().As<IRegisterUseCase>().InstancePerLifetimeScope();
         }
     }
 }

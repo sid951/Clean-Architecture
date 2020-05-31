@@ -1,10 +1,11 @@
-﻿using System;
+﻿using Core.USeCaseResponse;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Core.Domain.Entity
+namespace Core.USeCaseRequest
 {
-    public class User
+    public class RegisterRequest : IUseCaseRequest<RegisterResponse>
     {
         public int Id { get; set; }
 
@@ -26,7 +27,7 @@ namespace Core.Domain.Entity
 
         public bool TwoFactorEnabled { get; set; }
 
-        internal User(string name, string username, string normaliedusername, string email, bool confirmemail, string phonenumber,
+        public RegisterRequest(string name, string username, string normaliedusername, string email, bool confirmemail, string phonenumber,
             bool isnumberconfirmed, bool twofactorauthentication, int id = 0, string passwordhash = null)
         {
             Id = id;
@@ -40,5 +41,7 @@ namespace Core.Domain.Entity
             TwoFactorEnabled = twofactorauthentication;
             PhoneNumber = phonenumber;
         }
+
+
     }
 }

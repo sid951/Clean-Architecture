@@ -1,4 +1,5 @@
 ﻿using Core.Domain.Entity;
+using Core.Dto.GatewayResponses.Repositories;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -10,5 +11,6 @@ namespace Core.Interfaces.Gateways.Repositories
     {
         Task<User> FindByName(string userName);
         Task<bool> CheckPassword(User user, string password);
+        public Task<CreateUserResponse> Create(User user);
     }
  }
