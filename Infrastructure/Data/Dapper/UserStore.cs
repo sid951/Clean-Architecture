@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Data.SqlClient;
 using System.Linq;
 using System.Text;
@@ -28,13 +29,24 @@ namespace Infrastructure.Data.Dapper
 
             using (var connection = new SqlConnection(_connectionString))
             {
-                await connection.OpenAsync(cancellationToken);
-                user.Id = await connection.QuerySingleAsync<int>($@"INSERT INTO [ApplicationUser] ([UserName], [NormalizedUserName], [Email],
-                    [NormalizedEmail], [EmailConfirmed], [PasswordHash], [PhoneNumber], [PhoneNumberConfirmed], [TwoFactorEnabled])
-                    VALUES (@{nameof(ApplicationUser.UserName)}, @{nameof(ApplicationUser.NormalizedUserName)}, @{nameof(ApplicationUser.Email)},
-                    @{nameof(ApplicationUser.NormalizedEmail)}, @{nameof(ApplicationUser.EmailConfirmed)}, @{nameof(ApplicationUser.PasswordHash)},
-                    @{nameof(ApplicationUser.PhoneNumber)}, @{nameof(ApplicationUser.PhoneNumberConfirmed)}, @{nameof(ApplicationUser.TwoFactorEnabled)});
-                    SELECT CAST(SCOPE_IDENTITY() as int)", user);
+
+                var p = new DynamicParameters();
+                p.Add("@Email", user.Email);
+                p.Add("@Password", user.PasswordHash);
+                //p.Add("@c", dbType: DbType.Int32, direction: ParameterDirection.ReturnValue);
+
+                connection.Execute("usp_Registration", p, commandType: CommandType.StoredProcedure);
+
+                //int b = p.Get<int>("@b");
+                //int c = p.Get<int>("@c");
+
+                //await connection.OpenAsync(cancellationToken);
+                //user.Id = await connection.QuerySingleAsync<int>($@"INSERT INTO [ApplicationUser] ([UserName], [NormalizedUserName], [Email],
+                //    [NormalizedEmail], [EmailConfirmed], [PasswordHash], [PhoneNumber], [PhoneNumberConfirmed], [TwoFactorEnabled])
+                //    VALUES (@{nameof(ApplicationUser.UserName)}, @{nameof(ApplicationUser.NormalizedUserName)}, @{nameof(ApplicationUser.Email)},
+                //    @{nameof(ApplicationUser.NormalizedEmail)}, @{nameof(ApplicationUser.EmailConfirmed)}, @{nameof(ApplicationUser.PasswordHash)},
+                //    @{nameof(ApplicationUser.PhoneNumber)}, @{nameof(ApplicationUser.PhoneNumberConfirmed)}, @{nameof(ApplicationUser.TwoFactorEnabled)});
+                //    SELECT CAST(SCOPE_IDENTITY() as int)", user);
             }
 
             return IdentityResult.Success;

@@ -60,6 +60,7 @@
     <Folder Include="Properties" />
     <Folder Include="dbo" />
     <Folder Include="dbo\tables" />
+    <Folder Include="Scripts\" />
   </ItemGroup>
   <ItemGroup>
     <Build Include="dbo\tables\AspNetRoles.sql" />
@@ -80,6 +81,7 @@
     <Build Include="dbo\tables\tbl_UserPanDetails.sql" />
     <Build Include="dbo\tables\tbl_UserBankDetails.sql" />
     <Build Include="dbo\tables\tbl_UserBalance.sql" />
+    <None Include="Scripts\ScriptsIgnoredOnImport.sql" />
   </ItemGroup>
   <ItemGroup>
     <RefactorLog Include="Quizoo.refactorlog" />
