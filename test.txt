@@ -1,115 +1,137 @@
+using AutoMapper;
+using AutoWrapper.Wrappers;
 using MediatR;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Filters;
-using Panorama.Users.API.Abstractions;
-using Panorama.Users.API.Configuration;
-using Panorama.Users.Domain.Enums;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
-namespace Panorama.Users.API.Filters
+namespace Panorama.Users.API.Handler.CommandHandler
 {
-    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-    public class ValidationFilterAttribute : ActionFilterAttribute
+    using Panorama.Core.Application.Abstractions.Services;
+    using Panorama.Core.Audit;
+    using Panorama.Core.Infrastructure.Enums;
+    using Panorama.Core.Infrastructure.Services;
+    using Panorama.Users.API.Abstractions;
+    using Panorama.Users.Domain;
+    using Panorama.Users.Domain.RequestModels.CommandRequestModels;
+    using Panorama.Users.ExternalProvider.Abstractions;
+
+    /// <summary>
+    /// Class handler used to reset password failure
+    /// </summary>
+    public class ResetPasswordFailureCommandHandler : BaseService, IRequestHandler<ResetPasswordFailureRequestModel, bool>
     {
-        private readonly ResourcesType _resource;
-        private readonly SecurityRightType _securityEnum;
+        
+        private readonly IExternalProviderUserService _externalProviderUserService;     
+        private readonly ILogger _logger;
+        private readonly IUserRetryService _userRetryService;
+        private readonly IUserService _userService;
+        private readonly IUserProvidersService _userProvidersService;
 
-        public ValidationFilterAttribute(ResourcesType resourcesEnum, SecurityRightType securityRightEnum)
+        /// <summary>
+        /// contructor for User update status
+        /// </summary>
+        /// <param name="repository"></param>
+        /// <param name="externalProviderUserService"></param>
+        /// <param name="logger"></param>
+        /// <param name="userRetryService"></param>
+        /// <param name="userService"></param>
+        /// <param name="userProvidersService"></param>
+        public ResetPasswordFailureCommandHandler(IUserRepository repository,IExternalProviderUserService externalProviderUserService,
+           ILogger<UpdateUserCommandHandelr> logger, IUserRetryService userRetryService,
+           IUserService userService, IUserProvidersService userProvidersService)
+           : base(repository)
         {
-            _resource = resourcesEnum;
-            _securityEnum = securityRightEnum;
+           
+            _externalProviderUserService = externalProviderUserService;
+            _logger = logger;
+            _userRetryService = userRetryService;
+            _userService = userService;
+            _userProvidersService = userProvidersService;
         }
 
-        public override async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+        /// <summary>
+        /// handler used to update user status
+        /// </summary>
+        /// <param name="request"></param>
+        /// <param name="cancellationToken"></param>
+        /// <returns></returns>
+        public async Task<bool> Handle(ResetPasswordFailureRequestModel request, CancellationToken cancellationToken)
         {
-            if (!IsAuthorizedUser(context))
+            var user = await _repository.GetAsync<User>(request.UserId);
+
+            if (user == null)
             {
-                context.Result = new UnauthorizedObjectResult("Unauthorized User");
-                return;
+                throw new ApiException($"User with id: {request.UserId} does not exist.", StatusCodes.Status404NotFound);
             }
 
-            if (!IsDeviceAuthorized(context))
+
+            request.ModifiedBy = request.CurrentUserId;
+
+            var ems = await _userService.GetEms(Convert.ToInt64(request.AdminGroupId));
+            var providerAndFirmDetails = await _userProvidersService.IsProviderExist(ems);
+            if (!string.IsNullOrEmpty(ems))
             {
-                context.Result = new UnauthorizedObjectResult("Unauthorized User");
-                return;
+                if (!providerAndFirmDetails.IsproviderExist)
+                {
+                    throw new ApiException("No service provider found for the given client", 400);
+                }
+                else if (!providerAndFirmDetails.IsFirmExist)
+                {
+                    throw new ApiException("No firm found for the given client", 400);
+                }
+                else
+                {
+                    if (user.ExternalProviderUserId > 0)
+                    {
+                        request.ExternalUserId = user.ExternalProviderUserId ?? 0;
+
+                        SuspendUserRequestModel suspendUserRequestModel = new SuspendUserRequestModel()
+                        {
+                            AdminGroupId = request.AdminGroupId,
+                            ExternalUserId = request.ExternalUserId,
+                            Status = false,
+                            UserId = request.UserId
+                        };
+
+                        dynamic returnValue = null;
+
+                        returnValue = _externalProviderUserService.SuspendUser(suspendUserRequestModel, providerAndFirmDetails.FirmName);
+
+                        if (returnValue.ResponseType == ResponseType.NotFound && !String.IsNullOrEmpty(returnValue.ErrorMessage))
+                        {
+                            throw new ApiException("Error occurred user not found in external authentication system, error message: " + returnValue.ErrorMessage);
+                        }
+                        else if (returnValue.ResponseType == ResponseType.ExceptionError && !String.IsNullOrEmpty(returnValue.ErrorMessage))
+                        {
+
+                            await _userRetryService.RetrySuspendUserAsync(suspendUserRequestModel, providerAndFirmDetails.FirmName);
+                            throw new ApiException(returnValue.ErrorMessage);
+                        }
+                        else if (returnValue.ResponseType == ResponseType.ValidationError && returnValue.ExternalProvidersErrors != null)
+                        {
+                            _logger.LogError("Error occurred while reseting password failure count in external authentication system are as below:");
+
+                            foreach (var msg in returnValue.ExternalProvidersErrors.Messages)
+                            {
+                                _logger.LogError($"Property Name: {msg.Property} Error Message: {msg.Message}");
+                            }
+
+                            throw new ApiException("Error occurred while reseting password failure count in external authentication system. Please contact customer support.");
+                        }
+
+                        await _userService.ResetPassordFailure(request);
+                    }
+
+                    return true;
+                }
             }
-
-            if (!IsLoggedInUser(context, out var CurrentLoggedInUserId))
+            else
             {
-                context.Result = new UnauthorizedObjectResult("Unauthorized User");
-                return;
+                throw new ApiException("No Ems found for the given group", 400);
             }
-
-            var dalRepository = (IUserRepository)context.HttpContext.RequestServices.GetService(typeof(IUserRepository));
-            var securityRight = await GetSecurityRightAsync(context, CurrentLoggedInUserId);
-
-            if (!await IsResourceAllowedAsync(dalRepository, securityRight))
-            {
-                context.Result = new UnauthorizedObjectResult("Unauthorized User");
-                return;
-            }
-
-            await next();
-        }
-
-        private bool IsAuthorizedUser(ActionExecutingContext context)
-        {
-            return context.HttpContext.User?.Claims?.FirstOrDefault(x => x.Type == "userId")?.Value != null
-                && context?.HttpContext?.User?.Claims?.FirstOrDefault(x => x.Type == "uniqueKey")?.Value != null;
-        }
-
-        private bool IsDeviceAuthorized(ActionExecutingContext context)
-        {
-            var appType = context.HttpContext.Request.Headers["apptype"].FirstOrDefault() ?? "other";
-            var currentDeviceFingerPrint = DeviceFingerPrint.GenerateFingurePrint(context.HttpContext, appType);
-            return currentDeviceFingerPrint == context?.HttpContext?.User?.Claims?.FirstOrDefault(x => x.Type == "uniqueKey")?.Value;
-        }
-
-        private bool IsLoggedInUser(ActionExecutingContext context, out long CurrentLoggedInUserId)
-        {
-            CurrentLoggedInUserId = 0;
-            return long.TryParse(UserClaims.UserId().ToString(), out CurrentLoggedInUserId) && CurrentLoggedInUserId > 0;
-        }
-
-        private async Task<int?> GetSecurityRightAsync(ActionExecutingContext context, long CurrentLoggedInUserId)
-        {
-            if (CurrentLoggedInUserId <= 0)
-                return null;
-
-            if (_resource == ResourcesType.ManageGroups && _securityEnum == SecurityRightType.CreateGroup)
-            {
-                var vals = context.ActionArguments.Values.AsEnumerable().FirstOrDefault();
-                System.Reflection.PropertyInfo pi = vals?.GetType().GetProperty("AdminGroupId");
-                int AdminGroupId = (int)(pi?.GetValue(vals, null));
-                return AdminGroupId > 0 ? (int)SecurityRightType.ModifyGroup : null;
-            }
-
-            if (_resource == ResourcesType.ManageUsers && _securityEnum == SecurityRightType.CreateMember && CurrentLoggedInUserId > 0)
-            {
-                return (int)SecurityRightType.ModifyMember;
-            }
-
-            return null;
-        }
-
-        private async Task<bool> IsResourceAllowedAsync(IUserRepository dalRepository, int? securityRight)
-        {
-            if (securityRight == null)
-            {
-                securityRight = (int)_securityEnum;
-            }
-
-            var param = new Dictionary<string, object>
-            {
-                { "ResourceId", (int)_resource },
-                { "SecurityRightId", securityRight },
-                { "UserId", UserClaims.UserId() }
-            };
-
-            return await dalRepository.ExecuteSPSingleAsync<bool>("usp_GetPermissions", param).ConfigureAwait(false);
         }
     }
 }
