@@ -17,37 +17,21 @@ namespace Panorama.Users.API.Handler.CommandHandler
     using Panorama.Users.ExternalProvider.Abstractions;
     using Panorama.Users.ExternalProvider.Models;
 
-    /// <summary>
-    /// Class used to update user status activate deactivate
-    /// </summary>
     public class ActivateUserCommandHandler : BaseService, IRequestHandler<ActivateUserRequestModel, bool>
     {
-        
         private readonly IExternalProviderUserService _externalProviderUserService;
-        
         private readonly ILogger _logger;
         private readonly IUserRetryService _userRetryService;
         private readonly IUserService _userService;
         private readonly IUserProvidersService _userProvidersService;
         private readonly UserBusinessSettings _userBusinessSettings;
 
-        /// <summary>
-        /// contructor for User update status
-        /// </summary>
-        /// <param name="repository"></param>
-        /// <param name="externalProviderUserService"></param>
-        /// <param name="logger"></param>
-        /// <param name="userRetryService"></param>
-        /// <param name="userService"></param>
-        /// <param name="userProvidersService"></param>
-        ///    <param name="userBusinessSettings"></param> 
         public ActivateUserCommandHandler(IUserRepository repository, IExternalProviderUserService externalProviderUserService,
             ILogger<UpdateUserCommandHandelr> logger, IUserRetryService userRetryService,
-           IUserService userService, IUserProvidersService userProvidersService, IOptions<UserBusinessSettings> userBusinessSettings)
-           : base(repository)
+            IUserService userService, IUserProvidersService userProvidersService, IOptions<UserBusinessSettings> userBusinessSettings)
+            : base(repository)
         {
-           
-            _externalProviderUserService = externalProviderUserService;            
+            _externalProviderUserService = externalProviderUserService;
             _logger = logger;
             _userRetryService = userRetryService;
             _userService = userService;
@@ -55,75 +39,71 @@ namespace Panorama.Users.API.Handler.CommandHandler
             _userBusinessSettings = userBusinessSettings.Value;
         }
 
-        /// <summary>
-        /// handler used to update user status
-        /// </summary>
-        /// <param name="request"></param>
-        /// <param name="cancellationToken"></param>
-        /// <returns></returns>
         public async Task<bool> Handle(ActivateUserRequestModel request, CancellationToken cancellationToken)
         {
-            var user = await _repository.GetAsync<User>(request.UserId);
+            var user = await GetUserAsync(request.UserId);
 
+            await ValidateExternalProviderDetailsAsync(request, user);
+
+            await UpdateUserActivationStatusAsync(request, user);
+
+            return true;
+        }
+
+        private async Task<User> GetUserAsync(long userId)
+        {
+            var user = await _repository.GetAsync<User>(userId);
             if (user == null)
             {
-                throw new ApiException($"User with id: {request.UserId} does not exist.", StatusCodes.Status404NotFound);
+                throw new ApiException($"User with id: {userId} does not exist.", StatusCodes.Status404NotFound);
             }
+            return user;
+        }
 
+        private async Task ValidateExternalProviderDetailsAsync(ActivateUserRequestModel request, User user)
+        {
             request.ModifiedBy = request.CurrentUserId;
-            var ems = await _userService.GetEms(request.AdminGroupId);
-            ems = ems == null ? _userBusinessSettings.InternalEms : ems;
+            var ems = await _userService.GetEms(request.AdminGroupId) ?? _userBusinessSettings.InternalEms;
 
             var providerAndFirmDetails = await _userProvidersService.IsProviderExist(ems);
-            if (!string.IsNullOrEmpty(ems))
-            {
-                if (!providerAndFirmDetails.IsproviderExist)
-                {
-                    throw new ApiException("No service provider found for the given client", 400);
-                }
-                else if (!providerAndFirmDetails.IsFirmExist)
-                {
-                    throw new ApiException("No firm found for the given client", 400);
-                }
-                else
-                {
-                    if (user.ExternalProviderUserId > 0)
-                    {
-                        request.ExternalUserId = user.ExternalProviderUserId ?? 0;
-
-                        dynamic returnValue = null;
-
-                        returnValue = _externalProviderUserService.ActivateDeactivateUser(request, providerAndFirmDetails.FirmName);
-
-                        if (returnValue.ResponseType == ResponseType.NotFound && !String.IsNullOrEmpty(returnValue.ErrorMessage))
-                        {
-                            throw new ApiException("Error occurred user not found in external authentication system, error message: " + returnValue.ErrorMessage);
-                        }
-                        else if (returnValue.ResponseType == ResponseType.ExceptionError && !String.IsNullOrEmpty(returnValue.ErrorMessage))
-                        {
-
-                            await _userRetryService.RetryActivateDeactivateUserAsync(request, providerAndFirmDetails.FirmName);
-                            throw new ApiException(returnValue.ErrorMessage);
-                        }
-                        else if (returnValue.ResponseType == ResponseType.ValidationError && returnValue.ExternalProvidersErrors != null)
-                        {
-                            _logger.LogError("Error occurred while activating/deactivating user in external authentication system are as below:");
-
-                           
-
-                            throw new ApiException("Error occurred while  activating/deactivating user in external authentication system. Please contact customer support.");
-                        }
-                    }
-
-                    await _userService.ActivateUser(request);
-
-                    return true;
-                }
-            }
-            else
+            if (string.IsNullOrEmpty(ems))
             {
                 throw new ApiException("No Ems found for the given group", 400);
             }
+            else if (!providerAndFirmDetails.IsproviderExist)
+            {
+                throw new ApiException("No service provider found for the given client", 400);
+            }
+            else if (!providerAndFirmDetails.IsFirmExist)
+            {
+                throw new ApiException("No firm found for the given client", 400);
+            }
+            else if (user.ExternalProviderUserId > 0)
+            {
+                request.ExternalUserId = user.ExternalProviderUserId ?? 0;
+
+                var returnValue = _externalProviderUserService.ActivateDeactivateUser(request, providerAndFirmDetails.FirmName);
+
+                if (returnValue.ResponseType == ResponseType.NotFound && !string.IsNullOrEmpty(returnValue.ErrorMessage))
+                {
+                    throw new ApiException("Error occurred user not found in the external authentication system, error message: " + returnValue.ErrorMessage);
+                }
+                else if (returnValue.ResponseType == ResponseType.ExceptionError && !string.IsNullOrEmpty(returnValue.ErrorMessage))
+                {
+                    await _userRetryService.RetryActivateDeactivateUserAsync(request, providerAndFirmDetails.FirmName);
+                    throw new ApiException(returnValue.ErrorMessage);
+                }
+                else if (returnValue.ResponseType == ResponseType.ValidationError && returnValue.ExternalProvidersErrors != null)
+                {
+                    _logger.LogError("Error occurred while activating/deactivating user in the external authentication system are as below:");
+                    throw new ApiException("Error occurred while activating/deactivating user in the external authentication system. Please contact customer support.");
+                }
+            }
+        }
+
+        private async Task UpdateUserActivationStatusAsync(ActivateUserRequestModel request, User user)
+        {
+            await _userService.ActivateUser(request);
         }
     }
 }
