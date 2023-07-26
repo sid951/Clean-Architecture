@@ -1,0 +1,119 @@
+using MediatR;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Panorama.Users.API.Abstractions;
+using Panorama.Users.API.Configuration;
+using Panorama.Users.Domain.Enums;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace Panorama.Users.API.Filters
+{
+    /// <summary>
+    /// ValidationFilterAttribute
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
+    public class ValidationFilterAttribute : ActionFilterAttribute
+    {
+        private readonly ResourcesType _resource;
+        private readonly SecurityRightType _securityEnum;
+        /// <summary>
+        /// ValidationFilterAttribute constructor
+        /// </summary>
+        public ValidationFilterAttribute()
+        {
+        }
+        /// <summary>
+        /// ValidationFilterAttribute
+        /// </summary>
+        /// <param name="resourcesEnum"></param>
+        /// <param name="securityRightEnum"></param>
+        public ValidationFilterAttribute(ResourcesType resourcesEnum, SecurityRightType securityRightEnum)
+        {
+            _resource = resourcesEnum;
+            _securityEnum = securityRightEnum;
+        }
+        /// <summary>
+        /// OnActionExecuting filter method
+        /// </summary>
+        /// <param name="context"></param>
+        public override void OnActionExecuting(ActionExecutingContext context)
+        {
+
+           
+            int? securityRight = null;
+           
+            if (context.HttpContext.User.Claims == null || context.HttpContext.User?.Claims?.FirstOrDefault(x => x.Type == "userId").Value == null
+                || context?.HttpContext?.User?.Claims?.FirstOrDefault(x => x.Type == "uniqueKey").Value == null)
+            {
+                context.Result = new UnauthorizedObjectResult("Unauthorized User");
+                return;
+            }
+            var appType = Convert.ToString(context.HttpContext.Request.Headers["apptype"]) == null? "other": Convert.ToString(context.HttpContext.Request.Headers["apptype"]);          
+            var currentDeviceFingerPrint = DeviceFingerPrint.GenerateFingurePrint(context.HttpContext, appType);
+            if (currentDeviceFingerPrint != context?.HttpContext?.User?.Claims?.FirstOrDefault(x => x.Type == "uniqueKey").Value)
+            {
+                context.Result = new UnauthorizedObjectResult("Unauthorized User");
+                return;
+            }
+            var CurrentLoggedInUserId = Convert.ToString(UserClaims.UserId());
+          
+            if (string.IsNullOrEmpty(CurrentLoggedInUserId))
+            {
+                context.Result = new UnauthorizedObjectResult("Unauthorized User");
+                return;
+            }
+            var mediator = (IMediator)context.HttpContext.RequestServices.GetService(typeof(IMediator));
+            var dalRepository = (IUserRepository)context.HttpContext.RequestServices.GetService(typeof(IUserRepository));
+            if (context.HttpContext != null && context.HttpContext.Request != null)
+            {
+                if (_resource == ResourcesType.ManageGroups && _securityEnum == SecurityRightType.CreateGroup)
+                {
+                    var vals = context.ActionArguments.Values.AsEnumerable().FirstOrDefault();
+                    System.Reflection.PropertyInfo pi = vals?.GetType().GetProperty("AdminGroupId");
+                    int AdminGroupId = (int)(pi?.GetValue(vals, null));
+                    if (AdminGroupId > 0)
+                    {
+                        securityRight = (int)SecurityRightType.ModifyGroup;
+                    }
+                }
+
+                if (_resource == ResourcesType.ManageUsers && _securityEnum == SecurityRightType.CreateMember)
+                {
+                    
+                    Int64 UserId = Convert.ToInt64(CurrentLoggedInUserId);
+                    if (UserId > 0)
+                    {
+                        securityRight = (int)SecurityRightType.ModifyMember;
+                    }
+                }
+
+            }
+            if (!string.IsNullOrEmpty(Convert.ToString(CurrentLoggedInUserId)) &&  Convert.ToInt64(CurrentLoggedInUserId) > 0)
+            {
+                var param = new Dictionary<string, object>();
+                param.Add("ResourceId", (int)_resource);
+                param.Add("SecurityRightId", securityRight == null ? (int)_securityEnum : (int)securityRight);
+                param.Add("UserId", Convert.ToInt64(CurrentLoggedInUserId));
+                var responseData = dalRepository.ExecuteSPSingleAsync<bool>("usp_GetPermissions", param);
+                if (!responseData.Result)
+                {
+                    context.Result = new UnauthorizedObjectResult("Unauthorized User");
+                    return;
+                }
+            }
+            else
+            {
+                context.Result = new BadRequestObjectResult("Unable to fetch headers for user");
+                return;
+            }
+
+            base.OnActionExecuting(context);
+        }
+
+        public override void OnActionExecuted(ActionExecutedContext context)
+        {
+        }
+    }
+}
