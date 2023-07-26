@@ -1,109 +1,107 @@
-using AutoWrapper.Wrappers;
 using MediatR;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Panorama.Users.API.Abstractions;
+using Panorama.Users.API.Configuration;
+using Panorama.Users.Domain.Enums;
 using System;
-using System.Threading;
-using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Linq;
 
-namespace Panorama.Users.API.Handler.CommandHandler
+namespace Panorama.Users.API.Filters
 {
-    using Microsoft.Extensions.Options;
-    using Panorama.Core.Infrastructure.Enums;
-    using Panorama.Core.Infrastructure.Services;
-    using Panorama.Users.API.Abstractions;
-    using Panorama.Users.Domain;
-    using Panorama.Users.Domain.RequestModels.CommandRequestModels;
-    using Panorama.Users.ExternalProvider.Abstractions;
-    using Panorama.Users.ExternalProvider.Models;
-
-    public class ActivateUserCommandHandler : BaseService, IRequestHandler<ActivateUserRequestModel, bool>
+    /// <summary>
+    /// ValidationFilterAttribute
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
+    public class ValidationFilterAttribute : ActionFilterAttribute
     {
-        private readonly IExternalProviderUserService _externalProviderUserService;
-        private readonly ILogger _logger;
-        private readonly IUserRetryService _userRetryService;
-        private readonly IUserService _userService;
-        private readonly IUserProvidersService _userProvidersService;
-        private readonly UserBusinessSettings _userBusinessSettings;
-
-        public ActivateUserCommandHandler(IUserRepository repository, IExternalProviderUserService externalProviderUserService,
-            ILogger<UpdateUserCommandHandelr> logger, IUserRetryService userRetryService,
-            IUserService userService, IUserProvidersService userProvidersService, IOptions<UserBusinessSettings> userBusinessSettings)
-            : base(repository)
+        private readonly ResourcesType _resource;
+        private readonly SecurityRightType _securityEnum;
+        /// <summary>
+        /// ValidationFilterAttribute constructor
+        /// </summary>
+        public ValidationFilterAttribute()
         {
-            _externalProviderUserService = externalProviderUserService;
-            _logger = logger;
-            _userRetryService = userRetryService;
-            _userService = userService;
-            _userProvidersService = userProvidersService;
-            _userBusinessSettings = userBusinessSettings.Value;
         }
-
-        public async Task<bool> Handle(ActivateUserRequestModel request, CancellationToken cancellationToken)
+        /// <summary>
+        /// ValidationFilterAttribute
+        /// </summary>
+        /// <param name="resourcesEnum"></param>
+        /// <param name="securityRightEnum"></param>
+        public ValidationFilterAttribute(ResourcesType resourcesEnum, SecurityRightType securityRightEnum)
         {
-            var user = await GetUserAsync(request.UserId);
-
-            await ValidateExternalProviderDetailsAsync(request, user);
-
-            await UpdateUserActivationStatusAsync(request, user);
-
-            return true;
+            _resource = resourcesEnum;
+            _securityEnum = securityRightEnum;
         }
-
-        private async Task<User> GetUserAsync(long userId)
+        /// <summary>
+        /// OnActionExecuting filter method
+        /// </summary>
+        /// <param name="context"></param>
+        public override async void OnActionExecuting(ActionExecutingContext context)
         {
-            var user = await _repository.GetAsync<User>(userId);
-            if (user == null)
-            {
-                throw new ApiException($"User with id: {userId} does not exist.", StatusCodes.Status404NotFound);
-            }
-            return user;
-        }
 
-        private async Task ValidateExternalProviderDetailsAsync(ActivateUserRequestModel request, User user)
-        {
-            request.ModifiedBy = request.CurrentUserId;
-            var ems = await _userService.GetEms(request.AdminGroupId) ?? _userBusinessSettings.InternalEms;
-
-            var providerAndFirmDetails = await _userProvidersService.IsProviderExist(ems);
-            if (string.IsNullOrEmpty(ems))
+           
+            int? securityRight = null;
+           
+            if (context.HttpContext.User?.Claims?.FirstOrDefault(x => x.Type == "userId")?.Value == null
+                || context?.HttpContext?.User?.Claims?.FirstOrDefault(x => x.Type == "uniqueKey")?.Value == null)
             {
-                throw new ApiException("No Ems found for the given group", 400);
+                context.Result = new UnauthorizedObjectResult("Unauthorized User");
+                return;
             }
-            else if (!providerAndFirmDetails.IsproviderExist)
+            var appType = context.HttpContext.Request.Headers["apptype"].FirstOrDefault() ?? "other";         
+            var currentDeviceFingerPrint = DeviceFingerPrint.GenerateFingurePrint(context.HttpContext, appType);
+            if (currentDeviceFingerPrint != context?.HttpContext?.User?.Claims?.FirstOrDefault(x => x.Type == "uniqueKey")?.Value)
             {
-                throw new ApiException("No service provider found for the given client", 400);
+                context.Result = new UnauthorizedObjectResult("Unauthorized User");
+                return;
             }
-            else if (!providerAndFirmDetails.IsFirmExist)
+            if (!long.TryParse(UserClaims.UserId().ToString(), out var CurrentLoggedInUserId) || CurrentLoggedInUserId <= 0)
             {
-                throw new ApiException("No firm found for the given client", 400);
+                context.Result = new UnauthorizedObjectResult("Unauthorized User");
+                return;
             }
-            else if (user.ExternalProviderUserId > 0)
+            var dalRepository = (IUserRepository)context.HttpContext.RequestServices.GetService(typeof(IUserRepository));
+            if (context.HttpContext != null && context.HttpContext.Request != null)
             {
-                request.ExternalUserId = user.ExternalProviderUserId ?? 0;
-
-                var returnValue = _externalProviderUserService.ActivateDeactivateUser(request, providerAndFirmDetails.FirmName);
-
-                if (returnValue.ResponseType == ResponseType.NotFound && !string.IsNullOrEmpty(returnValue.ErrorMessage))
+                if (_resource == ResourcesType.ManageGroups && _securityEnum == SecurityRightType.CreateGroup)
                 {
-                    throw new ApiException("Error occurred user not found in the external authentication system, error message: " + returnValue.ErrorMessage);
+                    var vals = context.ActionArguments.Values.AsEnumerable().FirstOrDefault();
+                    System.Reflection.PropertyInfo pi = vals?.GetType().GetProperty("AdminGroupId");
+                    int AdminGroupId = (int)(pi?.GetValue(vals, null));
+                    if (AdminGroupId > 0)
+                    {
+                        securityRight = (int)SecurityRightType.ModifyGroup;
+                    }
                 }
-                else if (returnValue.ResponseType == ResponseType.ExceptionError && !string.IsNullOrEmpty(returnValue.ErrorMessage))
+
+                if (_resource == ResourcesType.ManageUsers && _securityEnum == SecurityRightType.CreateMember && CurrentLoggedInUserId > 0)
                 {
-                    await _userRetryService.RetryActivateDeactivateUserAsync(request, providerAndFirmDetails.FirmName);
-                    throw new ApiException(returnValue.ErrorMessage);
+                    securityRight = (int)SecurityRightType.ModifyMember;
                 }
-                else if (returnValue.ResponseType == ResponseType.ValidationError && returnValue.ExternalProvidersErrors != null)
+
+            }
+            if (CurrentLoggedInUserId > 0)
+            {
+                var param = new Dictionary<string, object>();
+                param.Add("ResourceId", (int)_resource);
+                param.Add("SecurityRightId", securityRight == null ? (int)_securityEnum : (int)securityRight);
+                param.Add("UserId", CurrentLoggedInUserId);
+                var responseData = await dalRepository.ExecuteSPSingleAsync<bool>("usp_GetPermissions", param).ConfigureAwait(false);
+                if (!responseData)
                 {
-                    _logger.LogError("Error occurred while activating/deactivating user in the external authentication system are as below:");
-                    throw new ApiException("Error occurred while activating/deactivating user in the external authentication system. Please contact customer support.");
+                    context.Result = new UnauthorizedObjectResult("Unauthorized User");
+                    return;
                 }
             }
-        }
+            else
+            {
+                context.Result = new BadRequestObjectResult("Unable to fetch headers for user");
+                return;
+            }
 
-        private async Task UpdateUserActivationStatusAsync(ActivateUserRequestModel request, User user)
-        {
-            await _userService.ActivateUser(request);
-        }
+            base.OnActionExecuting(context);
+        }       
     }
 }
