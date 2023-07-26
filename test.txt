@@ -18,126 +18,128 @@ namespace Panorama.Users.API.Handler.CommandHandler
     using Panorama.Users.Domain.RequestModels.CommandRequestModels;
     using Panorama.Users.ExternalProvider.Abstractions;
 
-    /// <summary>
-    /// Class handler used to suspend/resumed user
-    /// </summary>
     public class SuspendUserCommandHandler : BaseService, IRequestHandler<SuspendUserRequestModel, bool>
     {
-        
         private readonly IExternalProviderUserService _externalProviderUserService;
         private readonly ILogger _logger;
         private readonly IUserRetryService _userRetryService;
         private readonly IUserService _userService;
         private readonly IUserProvidersService _userProvidersService;
 
-        /// <summary>
-        /// contructor for User update status
-        /// </summary>
-        /// <param name="repository"></param>       
-        /// <param name="externalProviderUserService"></param>
-        /// <param name="logger"></param>
-        /// <param name="userRetryService"></param>
-        /// <param name="userService"></param>
-        /// <param name="userProvidersService"></param>
-        public SuspendUserCommandHandler(IUserRepository repository,  IExternalProviderUserService externalProviderUserService,
-             ILogger<UpdateUserCommandHandelr> logger, IUserRetryService userRetryService,
-           IUserService userService, IUserProvidersService userProvidersService)
-           : base(repository)
+        public SuspendUserCommandHandler(IUserRepository repository, IExternalProviderUserService externalProviderUserService,
+            ILogger<UpdateUserCommandHandelr> logger, IUserRetryService userRetryService,
+            IUserService userService, IUserProvidersService userProvidersService)
+            : base(repository)
         {
-           
-            _externalProviderUserService = externalProviderUserService;          
+            _externalProviderUserService = externalProviderUserService;
             _logger = logger;
             _userRetryService = userRetryService;
             _userService = userService;
             _userProvidersService = userProvidersService;
         }
 
-        /// <summary>
-        /// handler used to update user status
-        /// </summary>
-        /// <param name="request"></param>
-        /// <param name="cancellationToken"></param>
-        /// <returns></returns>
         public async Task<bool> Handle(SuspendUserRequestModel request, CancellationToken cancellationToken)
         {
-            var user = await _repository.GetAsync<User>(request.UserId);
+            var user = await GetUserAsync(request.UserId);
+            await ValidateUserStatusAsync(request, user);
+            await ValidateExternalProviderDetailsAsync(request, user);
+            await SuspendOrResumeUserAsync(request, user);
+            return true;
+        }
 
-
+        private async Task<User> GetUserAsync(long userId)
+        {
+            var user = await _repository.GetAsync<User>(userId);
             if (user == null)
             {
-                throw new ApiException($"User with id: {request.UserId} does not exist.", StatusCodes.Status404NotFound);
+                throw new ApiException($"User with id: {userId} does not exist.", StatusCodes.Status404NotFound);
             }
-            request.ModifiedBy = request.CurrentUserId;
+            return user;
+        }
 
+        private async Task ValidateUserStatusAsync(SuspendUserRequestModel request, User user)
+        {
+            request.ModifiedBy = request.CurrentUserId;
             if (request.Status)
             {
                 if (request.LockReasonId <= 0 || request.LockReasonId == null)
-                    throw new ApiException($"LockReasonId is required.", StatusCodes.Status404NotFound);
+                {
+                    throw new ApiException("LockReasonId is required.", StatusCodes.Status404NotFound);
+                }
 
                 var isLockReasonExist = await _userService.IsLockReasonExist(request);
-
                 if (!isLockReasonExist)
                 {
                     throw new ApiException($"LockReasonId : {request.LockReasonId} does not exist.", StatusCodes.Status404NotFound);
                 }
             }
             else
+            {
                 request.LockReasonId = null;
+            }
+        }
 
-          
-
+        private async Task ValidateExternalProviderDetailsAsync(SuspendUserRequestModel request, User user)
+        {
             var ems = await _userService.GetEms(Convert.ToInt64(request.AdminGroupId));
             var providerAndFirmDetails = await _userProvidersService.IsProviderExist(ems);
-            if (!string.IsNullOrEmpty(ems))
-            {
-                if (!providerAndFirmDetails.IsproviderExist)
-                {
-                    throw new ApiException("No service provider found for the given client", 400);
-                }
-                else if (!providerAndFirmDetails.IsFirmExist)
-                {
-                    throw new ApiException("No firm found for the given client", 400);
-                }
-                else
-                {
-                    if (user.ExternalProviderUserId > 0)
-                    {
-                        request.ExternalUserId = user.ExternalProviderUserId ?? 0;                       
-
-                        var returnValue = _externalProviderUserService.SuspendUser(request, providerAndFirmDetails.FirmName);
-
-                        if (returnValue.ResponseType == ResponseType.NotFound && !String.IsNullOrEmpty(returnValue.ErrorMessage))
-                        {
-                            throw new ApiException("Error occurred user not found in external authentication system, error message: " + returnValue.ErrorMessage);
-                        }
-                        else if (returnValue.ResponseType == ResponseType.ExceptionError && !String.IsNullOrEmpty(returnValue.ErrorMessage))
-                        {
-
-                            await _userRetryService.RetrySuspendUserAsync(request, providerAndFirmDetails.FirmName);
-                            throw new ApiException(returnValue.ErrorMessage);
-                        }
-                        else if (returnValue.ResponseType == ResponseType.ValidationError && returnValue.ExternalProvidersErrors != null)
-                        {
-                            _logger.LogError("Error occurred while suspending/resuming user in external authentication system are as below:");
-
-                            foreach (var msg in returnValue.ExternalProvidersErrors.Messages)
-                            {
-                                _logger.LogError($"Property Name: {msg.Property} Error Message: {msg.Message}");
-                            }
-
-                            throw new ApiException("Error occurred while  suspending/resuming user in external authentication system. Please contact customer support.");
-                        }
-
-                        await _userService.SuspendUser(request);
-                    }
-
-                    return true;
-                }
-            }
-            else
+            if (string.IsNullOrEmpty(ems))
             {
                 throw new ApiException("No Ems found for the given group", 400);
             }
+            else if (!providerAndFirmDetails.IsproviderExist)
+            {
+                throw new ApiException("No service provider found for the given client", 400);
+            }
+            else if (!providerAndFirmDetails.IsFirmExist)
+            {
+                throw new ApiException("No firm found for the given client", 400);
+            }
+            else if (user.ExternalProviderUserId > 0)
+            {
+                request.ExternalUserId = user.ExternalProviderUserId ?? 0;
+                var returnValue = _externalProviderUserService.SuspendUser(request, providerAndFirmDetails.FirmName);
+                HandleExternalProviderResponse(returnValue);
+            }
+        }
+
+        private void HandleExternalProviderResponse(dynamic returnValue)
+        {
+            if (returnValue.ResponseType == ResponseType.NotFound && !String.IsNullOrEmpty(returnValue.ErrorMessage))
+            {
+                throw new ApiException("Error occurred user not found in external authentication system, error message: " + returnValue.ErrorMessage);
+            }
+            else if (returnValue.ResponseType == ResponseType.ExceptionError && !String.IsNullOrEmpty(returnValue.ErrorMessage))
+            {
+                throw new ApiException(returnValue.ErrorMessage);
+            }
+            else if (returnValue.ResponseType == ResponseType.ValidationError && returnValue.ExternalProvidersErrors != null)
+            {
+                LogExternalProviderErrors(returnValue.ExternalProvidersErrors.Messages);
+                throw new ApiException("Error occurred while suspending/resuming user in external authentication system. Please contact customer support.");
+            }
+        }
+
+        private void LogExternalProviderErrors(IEnumerable<ExternalProviderErrorMessage> messages)
+        {
+            _logger.LogError("Error occurred while suspending/resuming user in external authentication system are as below: {Properties}", messages);
+        }
+
+        private async Task SuspendOrResumeUserAsync(SuspendUserRequestModel request, User user)
+        {
+            if (user.ExternalProviderUserId > 0)
+            {
+                await SuspendUserInExternalProviderAsync(request);
+            }
+            await _userService.SuspendUser(request);
+        }
+
+        private async Task SuspendUserInExternalProviderAsync(SuspendUserRequestModel request)
+        {
+            var providerAndFirmDetails = await _userProvidersService.IsProviderExist(request.AdminGroupId.ToString());
+            request.ExternalUserId = request.UserId;
+            var returnValue = _externalProviderUserService.SuspendUser(request, providerAndFirmDetails.FirmName);
+            HandleExternalProviderResponse(returnValue);
         }
     }
 }
