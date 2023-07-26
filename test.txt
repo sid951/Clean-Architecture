@@ -1,119 +1,129 @@
+using AutoWrapper.Wrappers;
 using MediatR;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Filters;
-using Panorama.Users.API.Abstractions;
-using Panorama.Users.API.Configuration;
-using Panorama.Users.Domain.Enums;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
-namespace Panorama.Users.API.Filters
+namespace Panorama.Users.API.Handler.CommandHandler
 {
+    using Microsoft.Extensions.Options;
+    using Panorama.Core.Infrastructure.Enums;
+    using Panorama.Core.Infrastructure.Services;
+    using Panorama.Users.API.Abstractions;
+    using Panorama.Users.Domain;
+    using Panorama.Users.Domain.RequestModels.CommandRequestModels;
+    using Panorama.Users.ExternalProvider.Abstractions;
+    using Panorama.Users.ExternalProvider.Models;
+
     /// <summary>
-    /// ValidationFilterAttribute
+    /// Class used to update user status activate deactivate
     /// </summary>
-    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-    public class ValidationFilterAttribute : ActionFilterAttribute
+    public class ActivateUserCommandHandler : BaseService, IRequestHandler<ActivateUserRequestModel, bool>
     {
-        private readonly ResourcesType _resource;
-        private readonly SecurityRightType _securityEnum;
-        /// <summary>
-        /// ValidationFilterAttribute constructor
-        /// </summary>
-        public ValidationFilterAttribute()
-        {
-        }
-        /// <summary>
-        /// ValidationFilterAttribute
-        /// </summary>
-        /// <param name="resourcesEnum"></param>
-        /// <param name="securityRightEnum"></param>
-        public ValidationFilterAttribute(ResourcesType resourcesEnum, SecurityRightType securityRightEnum)
-        {
-            _resource = resourcesEnum;
-            _securityEnum = securityRightEnum;
-        }
-        /// <summary>
-        /// OnActionExecuting filter method
-        /// </summary>
-        /// <param name="context"></param>
-        public override void OnActionExecuting(ActionExecutingContext context)
-        {
+        
+        private readonly IExternalProviderUserService _externalProviderUserService;
+        
+        private readonly ILogger _logger;
+        private readonly IUserRetryService _userRetryService;
+        private readonly IUserService _userService;
+        private readonly IUserProvidersService _userProvidersService;
+        private readonly UserBusinessSettings _userBusinessSettings;
 
+        /// <summary>
+        /// contructor for User update status
+        /// </summary>
+        /// <param name="repository"></param>
+        /// <param name="externalProviderUserService"></param>
+        /// <param name="logger"></param>
+        /// <param name="userRetryService"></param>
+        /// <param name="userService"></param>
+        /// <param name="userProvidersService"></param>
+        ///    <param name="userBusinessSettings"></param> 
+        public ActivateUserCommandHandler(IUserRepository repository, IExternalProviderUserService externalProviderUserService,
+            ILogger<UpdateUserCommandHandelr> logger, IUserRetryService userRetryService,
+           IUserService userService, IUserProvidersService userProvidersService, IOptions<UserBusinessSettings> userBusinessSettings)
+           : base(repository)
+        {
            
-            int? securityRight = null;
-           
-            if (context.HttpContext.User.Claims == null || context.HttpContext.User?.Claims?.FirstOrDefault(x => x.Type == "userId").Value == null
-                || context?.HttpContext?.User?.Claims?.FirstOrDefault(x => x.Type == "uniqueKey").Value == null)
-            {
-                context.Result = new UnauthorizedObjectResult("Unauthorized User");
-                return;
-            }
-            var appType = Convert.ToString(context.HttpContext.Request.Headers["apptype"]) == null? "other": Convert.ToString(context.HttpContext.Request.Headers["apptype"]);          
-            var currentDeviceFingerPrint = DeviceFingerPrint.GenerateFingurePrint(context.HttpContext, appType);
-            if (currentDeviceFingerPrint != context?.HttpContext?.User?.Claims?.FirstOrDefault(x => x.Type == "uniqueKey").Value)
-            {
-                context.Result = new UnauthorizedObjectResult("Unauthorized User");
-                return;
-            }
-            var CurrentLoggedInUserId = Convert.ToString(UserClaims.UserId());
-          
-            if (string.IsNullOrEmpty(CurrentLoggedInUserId))
-            {
-                context.Result = new UnauthorizedObjectResult("Unauthorized User");
-                return;
-            }
-            var mediator = (IMediator)context.HttpContext.RequestServices.GetService(typeof(IMediator));
-            var dalRepository = (IUserRepository)context.HttpContext.RequestServices.GetService(typeof(IUserRepository));
-            if (context.HttpContext != null && context.HttpContext.Request != null)
-            {
-                if (_resource == ResourcesType.ManageGroups && _securityEnum == SecurityRightType.CreateGroup)
-                {
-                    var vals = context.ActionArguments.Values.AsEnumerable().FirstOrDefault();
-                    System.Reflection.PropertyInfo pi = vals?.GetType().GetProperty("AdminGroupId");
-                    int AdminGroupId = (int)(pi?.GetValue(vals, null));
-                    if (AdminGroupId > 0)
-                    {
-                        securityRight = (int)SecurityRightType.ModifyGroup;
-                    }
-                }
+            _externalProviderUserService = externalProviderUserService;            
+            _logger = logger;
+            _userRetryService = userRetryService;
+            _userService = userService;
+            _userProvidersService = userProvidersService;
+            _userBusinessSettings = userBusinessSettings.Value;
+        }
 
-                if (_resource == ResourcesType.ManageUsers && _securityEnum == SecurityRightType.CreateMember)
-                {
-                    
-                    Int64 UserId = Convert.ToInt64(CurrentLoggedInUserId);
-                    if (UserId > 0)
-                    {
-                        securityRight = (int)SecurityRightType.ModifyMember;
-                    }
-                }
+        /// <summary>
+        /// handler used to update user status
+        /// </summary>
+        /// <param name="request"></param>
+        /// <param name="cancellationToken"></param>
+        /// <returns></returns>
+        public async Task<bool> Handle(ActivateUserRequestModel request, CancellationToken cancellationToken)
+        {
+            var user = await _repository.GetAsync<User>(request.UserId);
 
-            }
-            if (!string.IsNullOrEmpty(Convert.ToString(CurrentLoggedInUserId)) &&  Convert.ToInt64(CurrentLoggedInUserId) > 0)
+            if (user == null)
             {
-                var param = new Dictionary<string, object>();
-                param.Add("ResourceId", (int)_resource);
-                param.Add("SecurityRightId", securityRight == null ? (int)_securityEnum : (int)securityRight);
-                param.Add("UserId", Convert.ToInt64(CurrentLoggedInUserId));
-                var responseData = dalRepository.ExecuteSPSingleAsync<bool>("usp_GetPermissions", param);
-                if (!responseData.Result)
+                throw new ApiException($"User with id: {request.UserId} does not exist.", StatusCodes.Status404NotFound);
+            }
+
+            request.ModifiedBy = request.CurrentUserId;
+            var ems = await _userService.GetEms(request.AdminGroupId);
+            ems = ems == null ? _userBusinessSettings.InternalEms : ems;
+
+            var providerAndFirmDetails = await _userProvidersService.IsProviderExist(ems);
+            if (!string.IsNullOrEmpty(ems))
+            {
+                if (!providerAndFirmDetails.IsproviderExist)
                 {
-                    context.Result = new UnauthorizedObjectResult("Unauthorized User");
-                    return;
+                    throw new ApiException("No service provider found for the given client", 400);
+                }
+                else if (!providerAndFirmDetails.IsFirmExist)
+                {
+                    throw new ApiException("No firm found for the given client", 400);
+                }
+                else
+                {
+                    if (user.ExternalProviderUserId > 0)
+                    {
+                        request.ExternalUserId = user.ExternalProviderUserId ?? 0;
+
+                        dynamic returnValue = null;
+
+                        returnValue = _externalProviderUserService.ActivateDeactivateUser(request, providerAndFirmDetails.FirmName);
+
+                        if (returnValue.ResponseType == ResponseType.NotFound && !String.IsNullOrEmpty(returnValue.ErrorMessage))
+                        {
+                            throw new ApiException("Error occurred user not found in external authentication system, error message: " + returnValue.ErrorMessage);
+                        }
+                        else if (returnValue.ResponseType == ResponseType.ExceptionError && !String.IsNullOrEmpty(returnValue.ErrorMessage))
+                        {
+
+                            await _userRetryService.RetryActivateDeactivateUserAsync(request, providerAndFirmDetails.FirmName);
+                            throw new ApiException(returnValue.ErrorMessage);
+                        }
+                        else if (returnValue.ResponseType == ResponseType.ValidationError && returnValue.ExternalProvidersErrors != null)
+                        {
+                            _logger.LogError("Error occurred while activating/deactivating user in external authentication system are as below:");
+
+                           
+
+                            throw new ApiException("Error occurred while  activating/deactivating user in external authentication system. Please contact customer support.");
+                        }
+                    }
+
+                    await _userService.ActivateUser(request);
+
+                    return true;
                 }
             }
             else
             {
-                context.Result = new BadRequestObjectResult("Unable to fetch headers for user");
-                return;
+                throw new ApiException("No Ems found for the given group", 400);
             }
-
-            base.OnActionExecuting(context);
-        }
-
-        public override void OnActionExecuted(ActionExecutedContext context)
-        {
         }
     }
 }
