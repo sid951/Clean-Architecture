@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
@@ -37,21 +38,18 @@ public class MyClass
             _httpClient.DefaultRequestHeaders.Add("selected-firm-name", model.FirmName);
 
             var httpResponse = await _httpClient.PostAsync(url, content);
-            httpResponse.EnsureSuccessStatusCode();
 
-            var result = await httpResponse.Content.ReadAsStringAsync();
-            var fisIdpUser = JsonConvert.DeserializeObject<FisIdpUserModel>(result);
-            fisUserCreationAugmentedResult.ExternalUserId = fisIdpUser.Id;
-            fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
-            _logger.LogInformation($"User Created in FIS IDP for username {model.UserName} with external user id {fisIdpUser.Id}");
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError("Error occurred while creating a user in external provider: " + ex.Message);
-
-            try
+            if (httpResponse.IsSuccessStatusCode)
             {
-                var errorResponseContent = await ex.Response.Content.ReadAsStringAsync();
+                var result = await httpResponse.Content.ReadAsStringAsync();
+                var fisIdpUser = JsonConvert.DeserializeObject<FisIdpUserModel>(result);
+                fisUserCreationAugmentedResult.ExternalUserId = fisIdpUser.Id;
+                fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
+                _logger.LogInformation($"User Created in FIS IDP for username {model.UserName} with external user id {fisIdpUser.Id}");
+            }
+            else
+            {
+                var errorResponseContent = await httpResponse.Content.ReadAsStringAsync();
                 var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(errorResponseContent);
 
                 _logger.LogError("Logging error string received from fis IDP: " + errorResponseContent);
@@ -62,18 +60,18 @@ public class MyClass
                 fisUserCreationAugmentedResult.ResponseType = ResponseType.ValidationError;
                 fisUserCreationAugmentedResult.ExternalProvidersErrors = errLogs;
             }
-            catch (Exception exception)
-            {
-                fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-                fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while creating a user in external provider.";
-                _logger.LogError("Error occurred while creating a user in external provider: " + exception.Message);
-            }
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError("Error occurred while creating a user in external provider: " + ex.Message);
+            fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
+            fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while creating a user in the external provider.";
         }
         catch (Exception ex)
         {
             _logger.LogError("Error occurred while creating a user in external provider: " + ex.Message);
             fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-            fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while creating a user in external provider.";
+            fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while creating a user in the external provider.";
         }
 
         return fisUserCreationAugmentedResult;
