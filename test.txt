@@ -19,68 +19,120 @@ public class MyClass
         _userBusinessSettings = userBusinessSettings;
     }
 
-    public async Task<FisUserCreationAugmentedResult> SuspendUser(SuspendUserRequestModel requestModel, string firmName)
-    {
-        _logger.LogInformation($"User suspend/resumed Initiated for External UserId {requestModel.ExternalUserId}");
-
-        var fisUserCreationAugmentedResult = new FisUserCreationAugmentedResult();
-
-        var status = requestModel.Status ? 1 : 0;
-
-        _logger.LogInformation($"User status is {status} for External UserId {requestModel.ExternalUserId}");
-
-        try
+      public async Task<FisUserCreationAugmentedResult> AddUserToExternalProvider(CreateUserCommandRequestModel model)
         {
-            // Prepare the PUT request URL.
-            string url = $"{_userBusinessSettings.FisIdpUrlForUser}suspend/{requestModel.ExternalUserId}?status={status}";
+            
 
-            // Serialize the requestModel to JSON.
-            string json = JsonConvert.SerializeObject(requestModel, new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() });
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var fisUserCreationAugmentedResult = new FisUserCreationAugmentedResult();
+            var getDepartmentDetails = GetDepartment(ref fisUserCreationAugmentedResult, model.FirmName);
+            var getUserProfileDetails = GetUserProfile(ref fisUserCreationAugmentedResult, model.FirmName);
+            var getFisIdpUserModel = GetFisIdpUserModel(model, model.FirmName, getDepartmentDetails, getUserProfileDetails);
+            var httpWebRequest = (HttpWebRequest)WebRequest.Create(_userBusinessSettings.FisIdpUrlForUser);
 
-            // Set request headers.
-            _httpClient.DefaultRequestHeaders.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
-            _httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
-            _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
-            _httpClient.DefaultRequestHeaders.Add("selected-firm-name", firmName);
-
-            // Send the PUT request.
-            HttpResponseMessage httpResponse = await _httpClient.PutAsync(url, content);
-
-            if (httpResponse.IsSuccessStatusCode)
-            {
-                fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
-                _logger.LogInformation($"User suspend/resumed in External portal for UserId : {requestModel.ExternalUserId}");
-            }
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError("Error occurred while suspend/resumed user in external provider." + ex.Message);
+            httpWebRequest.ContentType = "application/json";
+            httpWebRequest.Method = "POST";
+            httpWebRequest.Headers.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
+            httpWebRequest.Headers.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
+            httpWebRequest.Headers.Add("Accept", "application/json");
+            httpWebRequest.Headers.Add("selected-firm-name", model.FirmName);
 
             try
             {
-                string errorResponse = await ex.Response.Content.ReadAsStringAsync();
-                var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(errorResponse);
+                using (var streamWriter = new StreamWriter(httpWebRequest.GetRequestStream()))
+                {
+                    string json = JsonConvert.SerializeObject(getFisIdpUserModel, new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() });
+                    streamWriter.Write(json);
+                }
 
-                _logger.LogError("Logging error string received from external provider: " + errorResponse);
-
-                fisUserCreationAugmentedResult.ResponseType = ResponseType.ValidationError;
-                fisUserCreationAugmentedResult.ExternalProvidersErrors = errLogs;
+                var httpResponse = (HttpWebResponse)httpWebRequest.GetResponse();
+                using (var streamReader = new StreamReader(httpResponse.GetResponseStream()))
+                {
+                    var result = streamReader.ReadToEnd();
+                    var fisIdpUser = JsonConvert.DeserializeObject<FisIdpUserModel>(result);
+                    fisUserCreationAugmentedResult.ExternalUserId = fisIdpUser.Id;
+                    fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
+                    _logger.LogInformation($"User Created in FIS IDP for username {model.UserName} with external user id {fisIdpUser.Id}");
+                }
             }
-            catch (Exception exception)
+            catch (WebException ex)
             {
-                fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-                fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while activated/deactivated user in external provider.";
-                _logger.LogError("Error occurred while suspend/resumed user in external provider." + exception.Message);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError("Error occurred while suspend/resumed user in external provider: " + ex.Message);
-            fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-            fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while activated/deactivated user in external provider.";
-        }
+                var response = (HttpWebResponse)ex.Response;
 
-        return fisUserCreationAugmentedResult;
-    }
+                _logger.LogError("Error occurred while creating a user in external provider." + ex.Message );
+
+                try
+                {
+                    var webResponse = (HttpWebResponse)ex.Response;
+                    var content = webResponse.GetResponseStream();
+                    var encode = System.Text.Encoding.GetEncoding("utf-8");
+                    StreamReader readStream = new StreamReader(content, encode);
+                    String str = readStream.ReadToEnd();
+                    var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(str);
+
+                    _logger.LogError("Logging error string received from fis IDP" + str);
+
+                    var userAlreadyExists = false;
+                    errLogs.Messages.ForEach(valitionResponseItem =>
+                    {
+                        if (valitionResponseItem.Message.Contains(_userBusinessSettings.UserAlreadyExistValidationMessageString))
+                        {
+                            userAlreadyExists = true;
+                        }
+                    });
+
+                    if (userAlreadyExists)
+                    {
+                        var fisIdpUser = GetFisIdpUserByName(model.UserName, model.FirmName);
+                        _logger.LogInformation($"User already exists in FIS IDP for username {model.UserName} with external user id {fisIdpUser.Id}");
+                        _logger.LogInformation("Validating the FIS IDP user against user input data");
+
+                        if (IsFisIdpUserMatchingPanoramaUserData(model.Email.EmailAddress, model.UserName, fisIdpUser))
+                        {
+                            if (await CheckUserRoleAndProfileOfExistingFisIdpUser(fisIdpUser, model.FirmName))
+                            {
+                                fisUserCreationAugmentedResult.ExternalUserId = fisIdpUser.Id;
+                                fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
+                            }
+                            else
+                            {
+                                LinkFisIdpUserWithPanorama(fisIdpUser, false, ref fisUserCreationAugmentedResult, model.FirmName, getDepartmentDetails, getUserProfileDetails);
+                            }
+                        }
+                        else
+                        {
+                            fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
+                            fisUserCreationAugmentedResult.IsConflict = true;
+                            fisUserCreationAugmentedResult.FisIdpUserModel = new UserModel()
+                            {
+                                FirstName = fisIdpUser.FirstName,
+                                LastName = fisIdpUser.LastName,
+                                EmailAddress = fisIdpUser.EmailAddress,
+                                MiddleName = fisIdpUser.MiddleName,
+                                UserId = fisIdpUser.LoginName
+                            };
+                        }
+                    }
+                    else
+                    {
+                        fisUserCreationAugmentedResult.ResponseType = ResponseType.ValidationError;
+                        fisUserCreationAugmentedResult.ExternalProvidersErrors = errLogs;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
+                    fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while creating a user in external provider. " + ex?.Message;
+                    _logger.LogError("Error occurred while creating a user in external provider." + ex?.Message);
+                    _logger.LogError("Error occurred while creating a user in external provider." + exception?.Message);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error occurred while creating a user in external provider " + ex.Message);
+                fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
+                fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while creating a user in external provider.";
+            }
+
+            return fisUserCreationAugmentedResult;
+        }
 }
