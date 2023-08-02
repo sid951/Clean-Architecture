@@ -1,94 +1,65 @@
-using System;
-using System.Net;
-using System.Net.Http;
-using System.Threading.Tasks;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Serialization;
-
-public class MyClass
-{
-    private readonly HttpClient _httpClient;
-    private readonly ILogger _logger;
-    private readonly UserBusinessSettings _userBusinessSettings;
-
-    public MyClass(HttpClient httpClient, ILogger logger, UserBusinessSettings userBusinessSettings)
-    {
-        _httpClient = httpClient;
-        _logger = logger;
-        _userBusinessSettings = userBusinessSettings;
-    }
-
-    public async Task<FisUserCreationAugmentedResult> DeleteUserFromExternalProvider(int userId, string firmName)
-    {
-        Console.WriteLine($"deleting user in external provider with user id {userId}");
-
-        var fisUserCreationAugmentedResult = new FisUserCreationAugmentedResult();
-
-        if (userId != 0)
+ public FisUserCreationAugmentedResult ChangeUserPasswordExternalProvider(ChangeUserPassword changeUserPassword, string firmName, long userId)
         {
-            string url = $"{_userBusinessSettings.FisIdpUrlForUser}/batch/permanent/?id={userId}";
+            var fisUserCreationAugmentedResult = new FisUserCreationAugmentedResult();
 
-            _httpClient.DefaultRequestHeaders.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
-            _httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
-            _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
-            _httpClient.DefaultRequestHeaders.Add("selected-firm-name", firmName);
-
+            var httpWebRequest = (HttpWebRequest)WebRequest.Create($"{_userBusinessSettings.FisIdpUrlForUser}reset-pwd/{userId}");
+            httpWebRequest.ContentType = "application/json";
+            httpWebRequest.Method = "PUT";
+            httpWebRequest.Headers.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
+            httpWebRequest.Headers.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
+            httpWebRequest.Headers.Add("Accept", "application/json");
+            httpWebRequest.Headers.Add("selected-firm-name", firmName);
             try
             {
-                var httpResponse = await _httpClient.DeleteAsync(url);
+                using (var streamWriter = new StreamWriter(httpWebRequest.GetRequestStream()))
+                {
+                    string json = JsonConvert.SerializeObject(changeUserPassword, new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() });
+                    streamWriter.Write(json);
+                }
 
-                if (httpResponse.IsSuccessStatusCode)
+                var httpResponse = (HttpWebResponse)httpWebRequest.GetResponse();
+
+                if (httpResponse.StatusCode == HttpStatusCode.OK)
                 {
                     fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
-                    Console.WriteLine($"User deleted in FIS IDP for external user id: {userId}");
-                }
-                else
-                {
-                    // Handle non-successful status codes here if needed.
-                    fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while deleting a user in external provider.";
-                    fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-                    Console.WriteLine($"Error occurred while deleting a user in external provider. Status Code: {httpResponse.StatusCode}");
 
-                    // Read and handle the error response content if available
-                    var errorResponseContent = await httpResponse.Content.ReadAsStringAsync();
-                    if (!string.IsNullOrEmpty(errorResponseContent))
-                    {
-                        try
-                        {
-                            var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(errorResponseContent);
-                            Console.WriteLine("Error response from the external provider:");
-                            Console.WriteLine(JsonConvert.SerializeObject(errLogs, Formatting.Indented));
-                            fisUserCreationAugmentedResult.ExternalProvidersErrors = errLogs;
-                        }
-                        catch (JsonException ex)
-                        {
-                            // Error occurred while deserializing the error response content.
-                            Console.WriteLine("Error occurred while deserializing the error response content:");
-                            Console.WriteLine(ex.Message);
-                        }
-                    }
+                    _logger.LogInformation($"User password changed in FIS IDP for user id: {userId}");
                 }
             }
-            catch (HttpRequestException ex)
+            catch (WebException ex)
             {
-                // The HttpClient request failed (e.g., network error, DNS resolution issue).
-                fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-                fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while deleting a user in external provider.";
-                Console.WriteLine("Error occurred while deleting a user in external provider: " + ex.Message);
+                var response = (HttpWebResponse)ex.Response;
+
+                _logger.LogError("Error occurred while changing a user password in external provider." + ex.Message);
+
+                try
+                {
+                    var webResponse = ((HttpWebResponse)ex.Response);
+                    var content = webResponse.GetResponseStream();
+                    var encode = System.Text.Encoding.GetEncoding("utf-8");
+                    StreamReader readStream = new StreamReader(content, encode);
+                    String str = readStream.ReadToEnd();
+                    var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(str);
+
+                    _logger.LogError("Logging error string received external provider" + str);
+
+                    fisUserCreationAugmentedResult.ResponseType = ResponseType.ValidationError;
+                    fisUserCreationAugmentedResult.ExternalProvidersErrors = errLogs;
+                }
+                catch (Exception exception)
+                {
+                    fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
+                    fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while changing user password in external provider.";
+                    _logger.LogError("Error occurred while changing user password in external provider." + exception.Message);
+                }
             }
             catch (Exception ex)
             {
-                // Other exceptions (e.g., JSON serialization, reading response content, etc.).
+                _logger.LogError("Error occurred while changing user password in external provider " + ex.Message);
                 fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-                fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while deleting a user in external provider.";
-                Console.WriteLine("Error occurred while deleting a user in external provider: " + ex.Message);
+                fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while changing user password in external provider.";
             }
+
+
+            return fisUserCreationAugmentedResult;
         }
-        else
-        {
-            fisUserCreationAugmentedResult.ResponseType = ResponseType.ValidationError;
-            fisUserCreationAugmentedResult.ErrorMessage = "Invalid User Id";
-        }
-        return fisUserCreationAugmentedResult;
-    }
-}
