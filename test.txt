@@ -84,4 +84,6 @@ public class MyClass
             Console.WriteLine("Error occurred while changing a user password in external provider: " + ex.Message);
         }
 
-        return fisUserCreationAugmentedResult
+        return fisUserCreationAugmentedResult;
+    }
+}
