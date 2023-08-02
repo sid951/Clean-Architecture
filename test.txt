@@ -1,91 +1,70 @@
-using System;
-using System.Net;
-using System.Net.Http;
-using System.Text;
-using System.Threading.Tasks;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Serialization;
-
-public class MyClass
-{
-    private readonly HttpClient _httpClient;
-    private readonly ILogger _logger;
-    private readonly UserBusinessSettings _userBusinessSettings;
-
-    public MyClass(HttpClient httpClient, ILogger logger, UserBusinessSettings userBusinessSettings)
-    {
-        _httpClient = httpClient;
-        _logger = logger;
-        _userBusinessSettings = userBusinessSettings;
-    }
-
-    public async Task<FisUserCreationAugmentedResult> SuspendUser(SuspendUserRequestModel requestModel, string firmName)
-    {
-        var fisUserCreationAugmentedResult = new FisUserCreationAugmentedResult();
-
-        var status = requestModel.Status ? 1 : 0;
-
-        string url = $"{_userBusinessSettings.FisIdpUrlForUser}suspend/{requestModel.ExternalUserId}?status={status}";
-
-        _httpClient.DefaultRequestHeaders.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
-        _httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
-        _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
-        _httpClient.DefaultRequestHeaders.Add("selected-firm-name", firmName);
-
-        try
+ public FisIdpDepartmentDetails GetDepartment(ref FisUserCreationAugmentedResult fisUserCreationAugmentedResult, string firmName)
         {
-            string json = JsonConvert.SerializeObject(requestModel, new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() });
-            var httpContent = new StringContent(json, Encoding.UTF8, "application/json");
-
-            var httpResponse = await _httpClient.PutAsync(url, httpContent);
-
-            if (httpResponse.IsSuccessStatusCode)
+            _logger.LogInformation($"getting department from external provider");
+            FisIdpDepartmentDetails fisIdpDepartmentModel = null;
+            if (!string.IsNullOrEmpty(firmName))
             {
-                fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
-                Console.WriteLine($"User suspend/resumed in External portal for UserId : {requestModel.ExternalUserId}");
-            }
-            else
-            {
-                // Handle non-successful status codes here if needed.
-                fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while suspend/resumed user in external provider.";
-                fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-                Console.WriteLine($"Error occurred while suspend/resumed user in external provider. Status Code: {httpResponse.StatusCode}");
 
-                // Read and handle the error response content if available
-                var errorResponseContent = await httpResponse.Content.ReadAsStringAsync();
-                if (!string.IsNullOrEmpty(errorResponseContent))
+                var httpWebRequest = (HttpWebRequest)WebRequest.Create(_userBusinessSettings.FisIdpDepartmentUrl);
+                httpWebRequest.ContentType = "application/json";
+                httpWebRequest.Method = "Get";
+                httpWebRequest.Headers.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
+                httpWebRequest.Headers.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
+                httpWebRequest.Headers.Add("Accept", "application/json");
+                httpWebRequest.Headers.Add("selected-firm-name", firmName);
+                try
                 {
+                    var httpResponse = (HttpWebResponse)httpWebRequest.GetResponse();
+                    using (var streamReader = new StreamReader(httpResponse.GetResponseStream()))
+                    {
+                        var result = streamReader.ReadToEnd();
+                        var arrayList = JObject.Parse(result).ToObject<FisIdpDepartmentDetails>();
+                        if (arrayList.data == null)
+                        {
+                            fisUserCreationAugmentedResult.ErrorMessage = "Department not found in external authentication system";
+                            fisUserCreationAugmentedResult.ResponseType = ResponseType.NotFound;
+                        }
+
+                        fisIdpDepartmentModel = arrayList;
+                    }
+                    return fisIdpDepartmentModel;
+                }
+                catch (WebException ex)
+                {
+                    var response = (HttpWebResponse)ex.Response;
+
+                    _logger.LogError("Error occurred while finding a department in external provider." + ex.Message);
+
                     try
                     {
-                        var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(errorResponseContent);
-                        Console.WriteLine("Error response from the external provider:");
-                        Console.WriteLine(JsonConvert.SerializeObject(errLogs, Formatting.Indented));
-                        fisUserCreationAugmentedResult.ExternalProvidersErrors = errLogs;
+                        var webResponse = (HttpWebResponse)ex.Response;
+                        var content = webResponse.GetResponseStream();
+                        var encode = System.Text.Encoding.GetEncoding("utf-8");
+                        StreamReader readStream = new StreamReader(content, encode);
+                        String str = readStream.ReadToEnd();
+                        var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(str);
+
+                        _logger.LogError("Logging error string received external provider" + str);
+
+                        if (str.Contains("record not found"))
+                        {
+                            fisUserCreationAugmentedResult.ResponseType = ResponseType.NotFound;
+                            fisUserCreationAugmentedResult.ErrorMessage = "No Department found in external authentication system";
+                        }
                     }
-                    catch (JsonException ex)
+                    catch (Exception exception)
                     {
-                        // Error occurred while deserializing the error response content.
-                        Console.WriteLine("Error occurred while deserializing the error response content:");
-                        Console.WriteLine(ex.Message);
+                        fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
+                        fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while fetching department from external provider.";
+                        _logger.LogError("Error occurred while fetching department from external provider." + exception.Message);
                     }
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogError("Error occurred while fetching department from external provider " + ex.Message);
+                    fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
+                    fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while fetching department from external provider.";
+                }
             }
+            return fisIdpDepartmentModel;
         }
-        catch (HttpRequestException ex)
-        {
-            // The HttpClient request failed (e.g., network error, DNS resolution issue).
-            fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-            fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while suspend/resumed user in external provider.";
-            Console.WriteLine("Error occurred while suspend/resumed user in external provider: " + ex.Message);
-        }
-        catch (Exception ex)
-        {
-            // Other exceptions (e.g., JSON serialization, reading response content, etc.).
-            fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-            fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while suspend/resumed user in external provider.";
-            Console.WriteLine("Error occurred while suspend/resumed user in external provider: " + ex.Message);
-        }
-
-        return fisUserCreationAugmentedResult;
-    }
-}
