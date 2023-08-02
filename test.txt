@@ -82,3 +82,10 @@ public class MyClass
                 // Other exceptions (e.g., JSON serialization, reading response content, etc.).
                 fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
                 fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while fetching department from external provider.";
+                _logger.LogError("Error occurred while fetching department from external provider: " + ex.Message);
+            }
+        }
+
+        return fisIdpDepartmentModel;
+    }
+}
