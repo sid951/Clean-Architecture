@@ -1,72 +1,52 @@
-private FisIdpUserModel GetFisIdpUserByExternalId(int externalUserId, ref FisUserCreationAugmentedResult fisUserCreationAugmentedResult, string FirmName)
+private async Task<FisIdpUserModel> GetFisIdpUserByExternalId(int externalUserId, ref FisUserCreationAugmentedResult fisUserCreationAugmentedResult, string FirmName)
+{
+    _logger.LogInformation($"Getting user from external provider with user id {externalUserId}");
+    FisIdpUserModel fisIdpUserModel = null;
+
+    if (externalUserId != 0)
+    {
+        try
         {
-            _logger.LogInformation($"getting user from external provider with user id {externalUserId}");
-            FisIdpUserModel fisIdpUserModel = null;
+            string url = $"{_userBusinessSettings.FisIdpUrlForUser}/{externalUserId}";
+            _httpClient.DefaultRequestHeaders.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
+            _httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
+            _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
+            _httpClient.DefaultRequestHeaders.Add("selected-firm-name", FirmName);
 
-            if (externalUserId != 0)
+            var httpResponse = await _httpClient.GetAsync(url);
+            if (httpResponse.IsSuccessStatusCode)
             {
-
-                var httpWebRequest = (HttpWebRequest)WebRequest.Create(_userBusinessSettings.FisIdpUrlForUser + "/" + externalUserId);
-                httpWebRequest.ContentType = "application/json";
-                httpWebRequest.Method = "Get";
-                httpWebRequest.Headers.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
-                httpWebRequest.Headers.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
-                httpWebRequest.Headers.Add("Accept", "application/json");
-                httpWebRequest.Headers.Add("selected-firm-name", FirmName);
-                try
-                {
-                    var httpResponse = (HttpWebResponse)httpWebRequest.GetResponse();
-                    using (var streamReader = new StreamReader(httpResponse.GetResponseStream()))
-                    {
-                        var result = streamReader.ReadToEnd();
-                        var arrayList = JObject.Parse(result).ToObject<FisIdpUserModel>();
-                        if (arrayList?.LoginName == null)
-                        {
-                            fisUserCreationAugmentedResult.ErrorMessage = "User not found in external authentication system";
-                            fisUserCreationAugmentedResult.ResponseType = ResponseType.NotFound;
-                        }
-
-                        fisIdpUserModel = arrayList;
-                    }
-                    return fisIdpUserModel;
-                }
-                catch (WebException ex)
-                {
-                    var response = (HttpWebResponse)ex.Response;
-
-                    _logger.LogError("Error occurred while Updating a user in external provider." + ex.Message);
-
-                    try
-                    {
-                        var webResponse = (HttpWebResponse)ex.Response;
-                        var content = webResponse.GetResponseStream();
-                        var encode = System.Text.Encoding.GetEncoding("utf-8");
-                        StreamReader readStream = new StreamReader(content, encode);
-                        String str = readStream.ReadToEnd();
-                        var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(str);
-
-                        _logger.LogError("Logging error string received external provider" + str);
-
-                        if (str.Contains("record not found"))
-                        {
-                            fisUserCreationAugmentedResult.ResponseType = ResponseType.NotFound;
-                            fisUserCreationAugmentedResult.ErrorMessage = "User not found in external authentication system";
-                        }
-                    }
-                    catch (Exception exception)
-                    {
-                        fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-                        fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while fetching user from external provider.";
-                        _logger.LogError("Error occurred while fetching user from external provider." + exception.Message);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError("Error occurred while fetching user from external provider " + ex.Message);
-                    fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-                    fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while fetching user from external provider.";
-                }
+                var result = await httpResponse.Content.ReadAsStringAsync();
+                fisIdpUserModel = JsonConvert.DeserializeObject<FisIdpUserModel>(result);
             }
-
-            return fisIdpUserModel;
+            else if (httpResponse.StatusCode == HttpStatusCode.NotFound)
+            {
+                fisUserCreationAugmentedResult.ErrorMessage = "User not found in external authentication system";
+                fisUserCreationAugmentedResult.ResponseType = ResponseType.NotFound;
+            }
+            else
+            {
+                // Handle other non-successful status codes here if needed.
+                fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while fetching user from external provider.";
+                fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
+                _logger.LogError($"Error occurred while fetching user from external provider. Status Code: {httpResponse.StatusCode}");
+            }
         }
+        catch (HttpRequestException ex)
+        {
+            // The HttpClient request failed (e.g., network error, DNS resolution issue).
+            _logger.LogError("Error occurred while fetching user from external provider: " + ex.Message);
+            fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
+            fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while fetching user from external provider.";
+        }
+        catch (Exception ex)
+        {
+            // Other exceptions (e.g., JSON deserialization, reading response content, etc.).
+            _logger.LogError("Error occurred while fetching user from external provider: " + ex.Message);
+            fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
+            fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while fetching user from external provider.";
+        }
+    }
+
+    return fisIdpUserModel;
+}
