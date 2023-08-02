@@ -1,6 +1,5 @@
 using System;
 using System.Net.Http;
-using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -17,7 +16,7 @@ public class MyClass
         _userBusinessSettings = userBusinessSettings;
     }
 
-    public async Task<FisIdpDepartmentDetails> GetDepartment(ref FisUserCreationAugmentedResult fisUserCreationAugmentedResult, string firmName)
+    public FisIdpDepartmentDetails GetDepartment(ref FisUserCreationAugmentedResult fisUserCreationAugmentedResult, string firmName)
     {
         _logger.LogInformation("Getting department from external provider");
         FisIdpDepartmentDetails fisIdpDepartmentModel = null;
@@ -32,13 +31,13 @@ public class MyClass
 
             try
             {
-                var httpResponse = await _httpClient.GetAsync(url);
+                var httpResponse = _httpClient.GetAsync(url).Result;
 
                 if (httpResponse.IsSuccessStatusCode)
                 {
-                    var responseContent = await httpResponse.Content.ReadAsStringAsync();
+                    var responseContent = httpResponse.Content.ReadAsStringAsync().Result;
                     fisIdpDepartmentModel = JsonConvert.DeserializeObject<FisIdpDepartmentDetails>(responseContent);
-                    
+
                     if (fisIdpDepartmentModel?.data == null)
                     {
                         fisUserCreationAugmentedResult.ErrorMessage = "Department not found in external authentication system";
@@ -52,7 +51,7 @@ public class MyClass
                     _logger.LogError($"Error occurred while finding a department in external provider. Status Code: {httpResponse.StatusCode}");
 
                     // Read and handle the error response content if available
-                    var errorResponseContent = await httpResponse.Content.ReadAsStringAsync();
+                    var errorResponseContent = httpResponse.Content.ReadAsStringAsync().Result;
                     if (!string.IsNullOrEmpty(errorResponseContent))
                     {
                         try
@@ -83,10 +82,3 @@ public class MyClass
                 // Other exceptions (e.g., JSON serialization, reading response content, etc.).
                 fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
                 fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while fetching department from external provider.";
-                _logger.LogError("Error occurred while fetching department from external provider: " + ex.Message);
-            }
-        }
-
-        return fisIdpDepartmentModel;
-    }
-}
