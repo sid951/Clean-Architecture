@@ -1,70 +1,64 @@
- public FisIdpUserProfileDetails GetUserProfile(ref FisUserCreationAugmentedResult fisUserCreationAugmentedResult, string firmName)
+public FisIdpUserProfileDetails GetUserProfile(ref FisUserCreationAugmentedResult fisUserCreationAugmentedResult, string firmName)
+{
+    _logger.LogInformation($"getting UserProfile from external provider");
+    FisIdpUserProfileDetails fisIdpUserProfileModel = null;
+    
+    if (string.IsNullOrEmpty(firmName))
+    {
+        fisUserCreationAugmentedResult.ResponseType = ResponseType.ValidationError;
+        fisUserCreationAugmentedResult.ErrorMessage = "Invalid firm name";
+        return null;
+    }
+
+    using (var httpClient = new HttpClient())
+    {
+        httpClient.DefaultRequestHeaders.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
+        httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
+        httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
+        httpClient.DefaultRequestHeaders.Add("selected-firm-name", firmName);
+
+        try
         {
-            _logger.LogInformation($"getting UserProfile from external provider");
-            FisIdpUserProfileDetails fisIdpUserProfileModel = null;
-            if (!string.IsNullOrEmpty(firmName))
+            var response = httpClient.GetAsync(_userBusinessSettings.FisIdpUserProfileUrl).Result;
+
+            if (response.IsSuccessStatusCode)
             {
-
-                var httpWebRequest = (HttpWebRequest)WebRequest.Create(_userBusinessSettings.FisIdpUserProfileUrl);
-                httpWebRequest.ContentType = "application/json";
-                httpWebRequest.Method = "Get";
-                httpWebRequest.Headers.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
-                httpWebRequest.Headers.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
-                httpWebRequest.Headers.Add("Accept", "application/json");
-                httpWebRequest.Headers.Add("selected-firm-name", firmName);
-                try
+                var result = response.Content.ReadAsStringAsync().Result;
+                var arrayList = JsonConvert.DeserializeObject<FisIdpUserProfileDetails>(result);
+                if (arrayList.data == null)
                 {
-                    var httpResponse = (HttpWebResponse)httpWebRequest.GetResponse();
-                    using (var streamReader = new StreamReader(httpResponse.GetResponseStream()))
-                    {
-                        var result = streamReader.ReadToEnd();
-                        var arrayList = JObject.Parse(result).ToObject<FisIdpUserProfileDetails>();
-                        if (arrayList.data == null)
-                        {
-                            fisUserCreationAugmentedResult.ErrorMessage = "No UserProfile  found in external authentication system";
-                            fisUserCreationAugmentedResult.ResponseType = ResponseType.NotFound;
-                        }
-
-                        fisIdpUserProfileModel = arrayList;
-                    }
-                    return fisIdpUserProfileModel;
+                    fisUserCreationAugmentedResult.ErrorMessage = "No UserProfile found in external authentication system";
+                    fisUserCreationAugmentedResult.ResponseType = ResponseType.NotFound;
                 }
-                catch (WebException ex)
+
+                fisIdpUserProfileModel = arrayList;
+            }
+            else
+            {
+                var str = response.Content.ReadAsStringAsync().Result;
+                var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(str);
+
+                _logger.LogError("Logging error string received external provider" + str);
+
+                if (str.Contains("record not found"))
                 {
-                    var response = (HttpWebResponse)ex.Response;
-
-                    _logger.LogError("Error occurred while finding a UserProfile in external provider." + ex.Message);
-
-                    try
-                    {
-                        var webResponse = (HttpWebResponse)ex.Response;
-                        var content = webResponse.GetResponseStream();
-                        var encode = System.Text.Encoding.GetEncoding("utf-8");
-                        StreamReader readStream = new StreamReader(content, encode);
-                        String str = readStream.ReadToEnd();
-                        var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(str);
-
-                        _logger.LogError("Logging error string received external provider" + str);
-
-                        if (str.Contains("record not found"))
-                        {
-                            fisUserCreationAugmentedResult.ResponseType = ResponseType.NotFound;
-                            fisUserCreationAugmentedResult.ErrorMessage = "UserProfile not found in external authentication system";
-                        }
-                    }
-                    catch (Exception exception)
-                    {
-                        fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-                        fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while fetching UserProfile from external provider.";
-                        _logger.LogError("Error occurred while fetching UserProfile from external provider." + exception.Message);
-                    }
+                    fisUserCreationAugmentedResult.ResponseType = ResponseType.NotFound;
+                    fisUserCreationAugmentedResult.ErrorMessage = "UserProfile not found in external authentication system";
                 }
-                catch (Exception ex)
+                else
                 {
-                    _logger.LogError("Error occurred while fetching UserProfile from external provider " + ex.Message);
-                    fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-                    fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while fetching UserProfile from external provider.";
+                    fisUserCreationAugmentedResult.ResponseType = ResponseType.ValidationError;
+                    fisUserCreationAugmentedResult.ExternalProvidersErrors = errLogs;
                 }
             }
-            return fisIdpUserProfileModel;
         }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error occurred while fetching UserProfile from external provider " + ex.Message);
+            fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
+            fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while fetching UserProfile from external provider.";
+        }
+    }
+
+    return fisIdpUserProfileModel;
+}
