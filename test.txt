@@ -1,89 +1,70 @@
-using System;
-using System.Net;
-using System.Net.Http;
-using System.Text;
-using System.Threading.Tasks;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Serialization;
-
-public class MyClass
-{
-    private readonly HttpClient _httpClient;
-    private readonly ILogger _logger;
-    private readonly UserBusinessSettings _userBusinessSettings;
-
-    public MyClass(HttpClient httpClient, ILogger logger, UserBusinessSettings userBusinessSettings)
-    {
-        _httpClient = httpClient;
-        _logger = logger;
-        _userBusinessSettings = userBusinessSettings;
-    }
-
-    public async Task<FisUserCreationAugmentedResult> ChangeUserPasswordExternalProvider(ChangeUserPassword changeUserPassword, string firmName, long userId)
-    {
-        var fisUserCreationAugmentedResult = new FisUserCreationAugmentedResult();
-
-        string url = $"{_userBusinessSettings.FisIdpUrlForUser}reset-pwd/{userId}";
-
-        _httpClient.DefaultRequestHeaders.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
-        _httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
-        _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
-        _httpClient.DefaultRequestHeaders.Add("selected-firm-name", firmName);
-
-        try
+public FisUserCreationAugmentedResult SuspendUser(SuspendUserRequestModel requestModel, string firmName)
         {
-            string json = JsonConvert.SerializeObject(changeUserPassword, new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() });
-            var httpContent = new StringContent(json, Encoding.UTF8, "application/json");
+            _logger.LogInformation($"User suspend/resumed Initiated for External UserId {requestModel.ExternalUserId}");
 
-            var httpResponse = await _httpClient.PutAsync(url, httpContent);
+            var fisUserCreationAugmentedResult = new FisUserCreationAugmentedResult();
 
-            if (httpResponse.IsSuccessStatusCode)
+            var status = requestModel.Status ? 1 : 0;
+
+            _logger.LogInformation($"User status is {status} for External UserId {requestModel.ExternalUserId}");
+
+            var httpWebRequest = (HttpWebRequest)WebRequest.Create($"{_userBusinessSettings.FisIdpUrlForUser}suspend/{requestModel.ExternalUserId}?status={status}");
+            httpWebRequest.ContentType = "application/json";
+            httpWebRequest.Method = "PUT";
+            httpWebRequest.Headers.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
+            httpWebRequest.Headers.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
+            httpWebRequest.Headers.Add("Accept", "application/json");
+            httpWebRequest.Headers.Add("selected-firm-name", firmName);
+            try
             {
-                fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
-                Console.WriteLine($"User password changed in FIS IDP for user id: {userId}");
-            }
-            else
-            {
-                // Handle non-successful status codes here if needed.
-                fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while changing a user password in external provider.";
-                fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-                Console.WriteLine($"Error occurred while changing a user password in external provider. Status Code: {httpResponse.StatusCode}");
-
-                // Read and handle the error response content if available
-                var errorResponseContent = await httpResponse.Content.ReadAsStringAsync();
-                if (!string.IsNullOrEmpty(errorResponseContent))
+                using (var streamWriter = new StreamWriter(httpWebRequest.GetRequestStream()))
                 {
-                    try
-                    {
-                        var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(errorResponseContent);
-                        Console.WriteLine("Error response from the external provider:");
-                        Console.WriteLine(JsonConvert.SerializeObject(errLogs, Formatting.Indented));
-                        fisUserCreationAugmentedResult.ExternalProvidersErrors = errLogs;
-                    }
-                    catch (JsonException ex)
-                    {
-                        // Error occurred while deserializing the error response content.
-                        Console.WriteLine("Error occurred while deserializing the error response content:");
-                        Console.WriteLine(ex.Message);
-                    }
+                    string json = JsonConvert.SerializeObject(requestModel, new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() });
+                    streamWriter.Write(json);
+                }
+
+                var httpResponse = (HttpWebResponse)httpWebRequest.GetResponse();
+
+                if (httpResponse.StatusCode == HttpStatusCode.OK)
+                {
+                    fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
+
+                    _logger.LogInformation($"User suspend/resumed in External portal for UserId : {requestModel.ExternalUserId}");
                 }
             }
-        }
-        catch (HttpRequestException ex)
-        {
-            // The HttpClient request failed (e.g., network error, DNS resolution issue).
-            fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-            fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while changing a user password in external provider.";
-            Console.WriteLine("Error occurred while changing a user password in external provider: " + ex.Message);
-        }
-        catch (Exception ex)
-        {
-            // Other exceptions (e.g., JSON serialization, reading response content, etc.).
-            fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-            fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while changing a user password in external provider.";
-            Console.WriteLine("Error occurred while changing a user password in external provider: " + ex.Message);
-        }
+            catch (WebException ex)
+            {
+                var response = (HttpWebResponse)ex.Response;
 
-        return fisUserCreationAugmentedResult;
-    }
-}
+                _logger.LogError("Error occurred while suspend/resumed user in external provider." + ex.Message);
+
+                try
+                {
+                    var webResponse = ((HttpWebResponse)ex.Response);
+                    var content = webResponse.GetResponseStream();
+                    var encode = System.Text.Encoding.GetEncoding("utf-8");
+                    StreamReader readStream = new StreamReader(content, encode);
+                    String str = readStream.ReadToEnd();
+                    var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(str);
+
+                    _logger.LogError("Logging error string received external provider" + str);
+
+                    fisUserCreationAugmentedResult.ResponseType = ResponseType.ValidationError;
+                    fisUserCreationAugmentedResult.ExternalProvidersErrors = errLogs;
+                }
+                catch (Exception exception)
+                {
+                    fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
+                    fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while activated/deactivated user in external provider.";
+                    _logger.LogError("Error occurred while suspend/resumed user in external provider." + exception.Message);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error occurred while suspend/resumed user in external provider " + ex.Message);
+                fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
+                fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while cactivated/deactivated user in external provider.";
+            }
+
+            return fisUserCreationAugmentedResult;
+        }
