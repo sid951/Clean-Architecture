@@ -1,67 +1,58 @@
-private void UpdateFisIdpUser(FisIdpUserModel userModel, ref FisUserCreationAugmentedResult fisUserCreationAugmentedResult, string FirmName)
+private async Task UpdateFisIdpUser(FisIdpUserModel userModel, ref FisUserCreationAugmentedResult fisUserCreationAugmentedResult, string FirmName)
+{
+    userModel.Password = null;
+    userModel.ForcePasswordChange = false;
+    userModel.AutoGeneratePassword = false;
+    userModel.SendEmailNotification = false;
+    userModel.SendPasswordEmailNotification = false;
+
+    try
+    {
+        string url = $"{_userBusinessSettings.FisIdpUrlForUser}/{userModel.Id}";
+        var json = JsonConvert.SerializeObject(userModel, new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() });
+        var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+        _httpClient.DefaultRequestHeaders.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
+        _httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
+        _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
+        _httpClient.DefaultRequestHeaders.Add("selected-firm-name", FirmName);
+
+        var httpResponse = await _httpClient.PutAsync(url, content);
+        httpResponse.EnsureSuccessStatusCode();
+
+        var result = await httpResponse.Content.ReadAsStringAsync();
+        var fidIdpUser = JsonConvert.DeserializeObject<FisIdpUserModel>(result);
+        fisUserCreationAugmentedResult.ExternalUserId = fidIdpUser.Id;
+        fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
+    }
+    catch (HttpRequestException ex)
+    {
+        _logger.LogError("Error occurred while updating a user in external provider: " + ex.Message);
+
+        try
         {
-            userModel.Password = null;
-            userModel.ForcePasswordChange = false;
-            userModel.AutoGeneratePassword = false;
-            userModel.SendEmailNotification = false;
-            userModel.SendPasswordEmailNotification = false;
+            var errorResponseContent = await ex.Response.Content.ReadAsStringAsync();
+            var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(errorResponseContent);
 
+            _logger.LogError("Logging error string received from external provider: " + errorResponseContent);
 
-            var httpWebRequest = (HttpWebRequest)WebRequest.Create(_userBusinessSettings.FisIdpUrlForUser + "/" + userModel.Id);
-            httpWebRequest.ContentType = "application/json";
-            httpWebRequest.Method = "PUT";
-            httpWebRequest.Headers.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
-            httpWebRequest.Headers.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
-            httpWebRequest.Headers.Add("Accept", "application/json");
-            httpWebRequest.Headers.Add("selected-firm-name", FirmName);
-            try
-            {
-                using (var streamWriter = new StreamWriter(httpWebRequest.GetRequestStream()))
-                {
-                    string json = JsonConvert.SerializeObject(userModel, new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() });
-                    streamWriter.Write(json);
-                }
+            // Handle the error response accordingly
+            // ...
 
-                var httpResponse = (HttpWebResponse)httpWebRequest.GetResponse();
-                using (var streamReader = new StreamReader(httpResponse.GetResponseStream()))
-                {
-                    var result = streamReader.ReadToEnd();
-                    var fidIdpUser = JsonConvert.DeserializeObject<FisIdpUserModel>(result);
-                    fisUserCreationAugmentedResult.ExternalUserId = fidIdpUser.Id;
-                    fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
-                }
-            }
-            catch (WebException ex)
-            {
-                var response = (HttpWebResponse)ex.Response;
-
-                _logger.LogError("Error occurred while Updating a user in external provider." + ex.Message);
-
-                try
-                {
-                    var webResponse = ((HttpWebResponse)ex.Response);
-                    var content = webResponse.GetResponseStream();
-                    var encode = System.Text.Encoding.GetEncoding("utf-8");
-                    StreamReader readStream = new StreamReader(content, encode);
-                    String str = readStream.ReadToEnd();
-                    var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(str);
-
-                    _logger.LogError("Logging error string received external provider" + str);
-
-                    fisUserCreationAugmentedResult.ResponseType = ResponseType.ValidationError;
-                    fisUserCreationAugmentedResult.ExternalProvidersErrors = errLogs;
-                }
-                catch (Exception exception)
-                {
-                    fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-                    fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while updating a user in external provider.";
-                    _logger.LogError("Error occurred while updating a user in external provider." + exception.Message);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("Error occurred while updating a user in external provider " + ex.Message);
-                fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-                fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while updating a user in external provider.";
-            }
+            fisUserCreationAugmentedResult.ResponseType = ResponseType.ValidationError;
+            fisUserCreationAugmentedResult.ExternalProvidersErrors = errLogs;
         }
+        catch (Exception exception)
+        {
+            fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
+            fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while updating a user in external provider.";
+            _logger.LogError("Error occurred while updating a user in external provider: " + exception.Message);
+        }
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError("Error occurred while updating a user in external provider: " + ex.Message);
+        fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
+        fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while updating a user in external provider.";
+    }
+}
