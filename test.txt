@@ -1,95 +1,79 @@
- public async Task<FisUserCreationAugmentedResult> AddUserToExternalProvider(CreateUserCommandRequestModel user)
-        {
-            var fisUserCreationAugmentedResult = new FisUserCreationAugmentedResult();
-            var getAddUserToExternalProviderDepartmentDetails = GetDepartment(ref fisUserCreationAugmentedResult, user.FirmName);
-            var getAddUserToExternalProviderUserProfileDetails = GetUserProfile(ref fisUserCreationAugmentedResult, user.FirmName);
-            var getAddUserToExternalProviderFisIdpUserModel = GetFisIdpUserModel(user, user.FirmName, getAddUserToExternalProviderDepartmentDetails, getAddUserToExternalProviderUserProfileDetails);
+public async Task<FisUserCreationAugmentedResult> AddUserToExternalProvider(CreateUserCommandRequestModel user)
+{
+    var fisUserCreationAugmentedResult = new FisUserCreationAugmentedResult();
+    
+    try
+    {
+        var fisIdpUserModel = await CreateFisIdpUserModelAsync(user);
+        var response = await SendUserToExternalProviderAsync(fisIdpUserModel, user.FirmName);
+        
+        await HandleResponseAsync(response, user, fisUserCreationAugmentedResult);
+    }
+    catch (Exception ex)
+    {
+        await HandleExceptionAsync(ex, fisUserCreationAugmentedResult);
+    }
 
-            try
-            {
-                string urlFisIdpUrlForUser = _userBusinessSettings.FisIdpUrlForUser;
-                var json = JsonConvert.SerializeObject(getAddUserToExternalProviderFisIdpUserModel, new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() });
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
-                using (var httpClientAddUserToExternalProvider = new HttpClient())
-                {
-                    httpClientAddUserToExternalProvider.DefaultRequestHeaders.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
-                    httpClientAddUserToExternalProvider.DefaultRequestHeaders.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
-                    httpClientAddUserToExternalProvider.DefaultRequestHeaders.Add("Accept", "application/json");
-                    httpClientAddUserToExternalProvider.DefaultRequestHeaders.Add("selected-firm-name", user.FirmName);
+    return fisUserCreationAugmentedResult;
+}
 
-                    var httpResponseAddUserToExternalProvider = await httpClientAddUserToExternalProvider.PostAsync(urlFisIdpUrlForUser, content);
-                    if (httpResponseAddUserToExternalProvider.IsSuccessStatusCode)
-                    {
+private async Task<FisIdpUserModel> CreateFisIdpUserModelAsync(CreateUserCommandRequestModel user)
+{
+    var departmentDetails = await GetDepartmentAsync(user.FirmName);
+    var userProfileDetails = await GetUserProfileAsync(user.FirmName);
+    
+    return GetFisIdpUserModel(user, user.FirmName, departmentDetails, userProfileDetails);
+}
 
-                        var result = await httpResponseAddUserToExternalProvider.Content.ReadAsStringAsync();
-                        var fisIdpUser = JsonConvert.DeserializeObject<FisIdpUserModel>(result);
-                        fisUserCreationAugmentedResult.ExternalUserId = fisIdpUser.Id;
-                        fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
-                        _logger.LogInformation("User Created in FIS IDP for username {UserName} with external user id {Id}", user.UserName, fisIdpUser.Id);
-                    }
-                    else
-                    {
-                            var errorResponseContentAddUserToExternalProvider = await httpResponseAddUserToExternalProvider.Content.ReadAsStringAsync();
-                            var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(errorResponseContentAddUserToExternalProvider);
+private async Task<HttpResponseMessage> SendUserToExternalProviderAsync(FisIdpUserModel fisIdpUserModel, string firmName)
+{
+    using (var httpClient = new HttpClient())
+    {
+        ConfigureHttpClient(httpClient, firmName);
+        var json = JsonConvert.SerializeObject(fisIdpUserModel, new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() });
+        var content = new StringContent(json, Encoding.UTF8, "application/json");
+        return await httpClient.PostAsync(_userBusinessSettings.FisIdpUrlForUser, content);
+    }
+}
 
-                            _logger.LogError("Logging error string received from fis IDP: {ErrorResponseContentAddUserToExternalProvider}", errorResponseContentAddUserToExternalProvider);
+private void ConfigureHttpClient(HttpClient httpClient, string firmName)
+{
+    httpClient.DefaultRequestHeaders.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
+    httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
+    httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
+    httpClient.DefaultRequestHeaders.Add("selected-firm-name", firmName);
+}
 
-                            var userAlreadyExists = false;
-                            errLogs.Messages.ForEach(valitionResponseItem =>
-                            {
-                                if (valitionResponseItem.Message.Contains(_userBusinessSettings.UserAlreadyExistValidationMessageString))
-                                {
-                                    userAlreadyExists = true;
-                                }
-                            });
+private async Task HandleResponseAsync(HttpResponseMessage response, CreateUserCommandRequestModel user, FisUserCreationAugmentedResult result)
+{
+    if (response.IsSuccessStatusCode)
+    {
+        var fisIdpUser = await GetFisIdpUserFromResponseAsync(response);
+        UpdateResultForSuccess(user, fisIdpUser, result);
+    }
+    else
+    {
+        await HandleErrorResponseAsync(response, user, result);
+    }
+}
 
-                            if (userAlreadyExists)
-                            {
-                                var fisIdpUser = GetFisIdpUserByName(user.UserName, user.FirmName);
-                                _logger.LogInformation("User already exists in FIS IDP for username {UserName} with external user id {Id}", user.UserName, fisIdpUser.Id);
-                                
-                                if (IsFisIdpUserMatchingPanoramaUserData(user.Email.EmailAddress, user.UserName, fisIdpUser))
-                                {
-                                    if (await CheckUserRoleAndProfileOfExistingFisIdpUser(fisIdpUser, user.FirmName))
-                                    {
-                                        fisUserCreationAugmentedResult.ExternalUserId = fisIdpUser.Id;
-                                        fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
-                                    }
-                                    else
-                                    {
-                                        LinkFisIdpUserWithPanorama(fisIdpUser, ref fisUserCreationAugmentedResult, user.FirmName, getAddUserToExternalProviderDepartmentDetails, getAddUserToExternalProviderUserProfileDetails);
-                                    }
-                                }
-                                else
-                                {
-                                    fisUserCreationAugmentedResult.ResponseType = ResponseType.Success;
-                                    fisUserCreationAugmentedResult.IsConflict = true;
-                                    fisUserCreationAugmentedResult.FisIdpUserModel = new UserModel()
-                                    {
-                                        FirstName = fisIdpUser.FirstName,
-                                        LastName = fisIdpUser.LastName,
-                                        EmailAddress = fisIdpUser.EmailAddress,
-                                        MiddleName = fisIdpUser.MiddleName,
-                                        UserId = fisIdpUser.LoginName
-                                    };
-                                }
-                            }
-                            else
-                            {
-                                fisUserCreationAugmentedResult.ResponseType = ResponseType.ValidationError;
-                                fisUserCreationAugmentedResult.ExternalProvidersErrors = errLogs;
-                            }                       
-                    }
-                }
-            }
+private async Task<FisIdpUserModel> GetFisIdpUserFromResponseAsync(HttpResponseMessage response)
+{
+    var result = await response.Content.ReadAsStringAsync();
+    return JsonConvert.DeserializeObject<FisIdpUserModel>(result);
+}
 
-            catch (Exception ex)
-            {
-                _logger.LogError("Error occurred while creating a user in external provider: {Message}", ex.Message);
-                fisUserCreationAugmentedResult.ResponseType = ResponseType.ExceptionError;
-                fisUserCreationAugmentedResult.ErrorMessage = "Error occurred while creating a user in external provider.";
-            }
+private async Task HandleErrorResponseAsync(HttpResponseMessage response, CreateUserCommandRequestModel user, FisUserCreationAugmentedResult result)
+{
+    var errorResponseContent = await response.Content.ReadAsStringAsync();
+    var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(errorResponseContent);
 
+    // Handle error response logic here
+}
 
-            return fisUserCreationAugmentedResult;
-        }
+private async Task HandleExceptionAsync(Exception ex, FisUserCreationAugmentedResult result)
+{
+    _logger.LogError("Error occurred while creating a user in external provider: {Message}", ex.Message);
+    result.ResponseType = ResponseType.ExceptionError;
+    result.ErrorMessage = "Error occurred while creating a user in external provider.";
+}
