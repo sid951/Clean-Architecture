@@ -1,79 +1,52 @@
-public async Task<FisUserCreationAugmentedResult> AddUserToExternalProvider(CreateUserCommandRequestModel user)
-{
-    var fisUserCreationAugmentedResult = new FisUserCreationAugmentedResult();
-    
-    try
-    {
-        var fisIdpUserModel = await CreateFisIdpUserModelAsync(user);
-        var response = await SendUserToExternalProviderAsync(fisIdpUserModel, user.FirmName);
-        
-        await HandleResponseAsync(response, user, fisUserCreationAugmentedResult);
-    }
-    catch (Exception ex)
-    {
-        await HandleExceptionAsync(ex, fisUserCreationAugmentedResult);
-    }
-
-    return fisUserCreationAugmentedResult;
-}
-
-private async Task<FisIdpUserModel> CreateFisIdpUserModelAsync(CreateUserCommandRequestModel user)
-{
-    var departmentDetails = await GetDepartmentAsync(user.FirmName);
-    var userProfileDetails = await GetUserProfileAsync(user.FirmName);
-    
-    return GetFisIdpUserModel(user, user.FirmName, departmentDetails, userProfileDetails);
-}
-
-private async Task<HttpResponseMessage> SendUserToExternalProviderAsync(FisIdpUserModel fisIdpUserModel, string firmName)
-{
-    using (var httpClient = new HttpClient())
-    {
-        ConfigureHttpClient(httpClient, firmName);
-        var json = JsonConvert.SerializeObject(fisIdpUserModel, new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() });
-        var content = new StringContent(json, Encoding.UTF8, "application/json");
-        return await httpClient.PostAsync(_userBusinessSettings.FisIdpUrlForUser, content);
-    }
-}
-
-private void ConfigureHttpClient(HttpClient httpClient, string firmName)
-{
-    httpClient.DefaultRequestHeaders.Add("X-SunGard-IdP-API-Key", _userBusinessSettings.PanoramaRewriteApiKey);
-    httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + _userBusinessSettings.AccessToken);
-    httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
-    httpClient.DefaultRequestHeaders.Add("selected-firm-name", firmName);
-}
-
-private async Task HandleResponseAsync(HttpResponseMessage response, CreateUserCommandRequestModel user, FisUserCreationAugmentedResult result)
-{
-    if (response.IsSuccessStatusCode)
-    {
-        var fisIdpUser = await GetFisIdpUserFromResponseAsync(response);
-        UpdateResultForSuccess(user, fisIdpUser, result);
-    }
-    else
-    {
-        await HandleErrorResponseAsync(response, user, result);
-    }
-}
-
-private async Task<FisIdpUserModel> GetFisIdpUserFromResponseAsync(HttpResponseMessage response)
-{
-    var result = await response.Content.ReadAsStringAsync();
-    return JsonConvert.DeserializeObject<FisIdpUserModel>(result);
-}
-
-private async Task HandleErrorResponseAsync(HttpResponseMessage response, CreateUserCommandRequestModel user, FisUserCreationAugmentedResult result)
-{
-    var errorResponseContent = await response.Content.ReadAsStringAsync();
-    var errLogs = JsonConvert.DeserializeObject<FisIdpValidationModel>(errorResponseContent);
-
-    // Handle error response logic here
-}
-
-private async Task HandleExceptionAsync(Exception ex, FisUserCreationAugmentedResult result)
-{
-    _logger.LogError("Error occurred while creating a user in external provider: {Message}", ex.Message);
-    result.ResponseType = ResponseType.ExceptionError;
-    result.ErrorMessage = "Error occurred while creating a user in external provider.";
-}
+<dx:ASPxGridLookup ID="lookUpDropDown" runat="server" Caption="Select Entity" CaptionStyle-Font-Bold="true"
+                        SelectionMode="Multiple" Theme="Office2010Silver" CssClass="lookupdropdownSelect" KeyFieldName="EMS"
+                        AutoPostBack="false" Width="200px">
+                        <ClientSideEvents Init="function(s, e) {s.GetGridView().SetWidth(s.GetWidth());} "
+                            DropDown="function(s, e) {	s.GetGridView().SetWidth(s.GetWidth());} " EndCallback="function(s,e){ colorUncolor(); }" />
+                        <Columns>
+                            <dx:GridViewDataTextColumn Caption="Entity Name" FieldName="ClientName" VisibleIndex="1"
+                                SortIndex="0" SortOrder="Ascending" Width="200px">
+                            </dx:GridViewDataTextColumn>
+                            <dx:GridViewDataTextColumn Caption="EMS" FieldName="EMS" VisibleIndex="2" Width="100px">
+                            </dx:GridViewDataTextColumn>
+                        </Columns>
+                        <GridViewProperties>
+                            <SettingsBehavior SortMode="Value" AutoFilterRowInputDelay="1800" ColumnResizeMode="Control"
+                                EnableRowHotTrack="false" AllowFocusedRow="false"></SettingsBehavior>
+                            <Settings ShowFilterBar="Visible" ShowFilterRow="True" ShowFilterRowMenu="True" ShowGroupFooter="VisibleIfExpanded"
+                                ShowGroupPanel="false" ColumnMinWidth="126"></Settings>
+                            <SettingsPager PageSize="10" Position="Bottom" AlwaysShowPager="true">
+                            </SettingsPager>
+                        </GridViewProperties>
+                        <GridViewStyles Cell-HorizontalAlign="Left"></GridViewStyles>
+                        <GridViewStylesPager Pager-CssClass="grdFilterBar">
+                        </GridViewStylesPager>
+                        <GridViewStylesEditors TextBox-CssClass="grdFilterBar">
+                        </GridViewStylesEditors>
+                        <GridViewStylesFilterControl>
+                            <Table CssClass="grdFilterBar">
+                            </Table>
+                        </GridViewStylesFilterControl>
+                        <GridViewStyles>
+                            <Header CssClass="font">
+                            </Header>
+                            <Row CssClass="font grdRows" Wrap="True">
+                            </Row>
+                            <SelectedRow CssClass="grdSelectedRow" Wrap="True">
+                            </SelectedRow>
+                            <RowHotTrack CssClass="grdRowHover" Wrap="True">
+                            </RowHotTrack>
+                            <FocusedRow BackColor="#909191">
+                            </FocusedRow>
+                            <EmptyDataRow CssClass="font">
+                            </EmptyDataRow>
+                            <FilterPopupActiveItem CssClass="grdFilterBar">
+                            </FilterPopupActiveItem>
+                            <FilterRowMenuItem CssClass="grdFilterBar">
+                            </FilterRowMenuItem>
+                            <FilterBar CssClass="grdFilterBar">
+                            </FilterBar>
+                            <FilterBuilderHeader CssClass="grdFilterBar">
+                            </FilterBuilderHeader>
+                        </GridViewStyles>
+                    </dx:ASPxGridLookup>
