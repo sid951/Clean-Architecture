@@ -1,3 +1,6 @@
+Exception: System.InvalidOperationException
+Message: Error during serialization or deserialization using the JSON JavaScriptSerializer. The length of the string exceeds the value set on the maxJsonLength property.
+
 public JsonResult TicketsDetail(string ticketId)
         {
             //var ticketCookie = HttpContext.Request.Cookies["ticketId"];
